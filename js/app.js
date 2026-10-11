@@ -33,7 +33,7 @@
   function setState(id, st) {
     if (st) progress[id] = st; else delete progress[id];
     save();
-    updateWrongBadge();
+    renderTop(currentSid);
   }
 
   // ───────────────────────── 채점
@@ -168,78 +168,126 @@
     const s = subjects.find((x) => x.id === sid);
     return s ? { s, u: s.units.find((x) => x.id === uid) } : {};
   }
+  const wrongCount = (items) => items ? items.filter((it) => progress[it.id] === "x").length
+    : Object.values(progress).filter((v) => v === "x").length;
   function updateWrongBadge() {
-    const n = Object.values(progress).filter((v) => v === "x").length;
     const a = $("#nav-wrong");
-    if (a) a.textContent = n ? `오답노트 ${n}` : "오답노트";
+    if (a) a.textContent = `오답 ${wrongCount()}`;
+  }
+  // 진행 점: 회색(시작 전) · 파랑(진행 중) · 초록(완료, 80% 이상) · 빨강(완료, 80% 미만)
+  function dotClass(st) {
+    if (!st.done) return "dot";
+    if (st.done < st.total) return "dot part";
+    return st.o / st.total >= 0.8 ? "dot done" : "dot weak";
+  }
+  const dots = (list) => h("div", { class: "dots" }, list.map((items) => h("i", { class: dotClass(stats(items)) })));
+  const legend = () => h("div", { class: "legend" },
+    h("span", {}, h("i", { style: "background:var(--green)" }), "완료"),
+    h("span", {}, h("i", { style: "background:var(--blue)" }), "진행 중"),
+    h("span", {}, h("i", { style: "background:var(--red)" }), "80% 미만"));
+  const subjectHref = (s) => s.href ? encodeURI(s.href) : `#/s/${s.id}`;
+
+  // 마지막으로 연 단원 (이어서 풀기)
+  const LAST = "story-last-v1";
+  const getLast = () => { try { return JSON.parse(localStorage.getItem(LAST)); } catch (e) { return null; } };
+  const setLast = (sid, uid) => { try { localStorage.setItem(LAST, JSON.stringify([sid, uid])); } catch (e) { /* 무시 */ } };
+  function firstOpenUnit(s) {
+    return s.units.find((u) => { const st = stats(allItems(u)); return st.done < st.total; }) || s.units[0];
+  }
+
+  // ───────────────────────── 상단바: 제목 + 과목 칩
+  let currentSid = null;
+  function renderTop(sid) {
+    currentSid = sid;
+    const top = $("#top");
+    const s = subjects.find((x) => x.id === sid);
+    const all = stats(subjects.flatMap((x) => x.units.flatMap(allItems)));
+    const st = s ? stats(s.units.flatMap(allItems)) : all;
+    top.replaceChildren(
+      h("div", { class: "toprow" },
+        h("a", { class: "ttl", href: s ? `#/s/${s.id}` : "#/" },
+          h("div", { class: "htt" }, s ? s.name : "📚 스토리 공부방"),
+          h("div", { class: "hts" }, `${s ? s.units.length + "단원 · " : ""}${st.done}/${st.total} 문항 풂`)),
+        h("a", { class: "ib", id: "nav-wrong", href: s ? `#/wrong/${s.id}` : "#/wrong" }, "오답")),
+      h("nav", { class: "packsel" },
+        h("a", { class: "chip" + (!s ? " on" : ""), href: "#/" }, "홈"),
+        subjects.map((x) => h("a", { class: "chip" + (x === s ? " on" : ""), href: subjectHref(x) }, x.name + (x.href ? " ↗" : "")))));
+    updateWrongBadge();
   }
 
   // ───────────────────────── 화면: 홈
-  function subjectCard(s) {
-    const st = stats(s.units.flatMap(allItems));
-    return h("a", { class: "subject-card", href: `#/s/${s.id}`, style: `--c:${s.color}` },
-      h("div", { class: "subject-icon" }, s.icon),
-      h("div", { class: "subject-name" }, s.name),
-      h("div", { class: "subject-desc" }, s.desc),
-      h("div", { class: "subject-meta" }, `${s.units.length}단원 · ${st.total}문제`),
-      bar(st, s.color),
-      h("div", { class: "subject-meta small" }, st.done ? `푼 문제 ${st.done} · 맞음 ${st.o}` : "아직 시작 전"));
-  }
   function examBox(s) {
-    return h("div", { class: "exam", style: `--c:${s.color}` },
-      h("div", { class: "exam-count" }, "📋 ", s.exam.count),
+    return h("div", { class: "exam" },
+      h("div", { class: "exam-count" }, s.exam.count),
       h("ul", {}, s.exam.range.map((r) => h("li", {}, r))));
+  }
+  function subjectTile(s) {
+    if (s.href) {
+      return h("a", { class: "utile", href: subjectHref(s) },
+        h("div", { class: "no" }, s.name, " ↗"),
+        h("div", { class: "tp" }, s.desc),
+        h("div", { class: "tp small" }, "따로 만든 영어 앱으로 이동"));
+    }
+    const st = stats(s.units.flatMap(allItems));
+    return h("a", { class: "utile" + (st.done === st.total && st.total ? " done" : ""), href: subjectHref(s) },
+      h("div", { class: "no" }, s.name),
+      h("div", { class: "tp" }, s.desc),
+      h("div", { class: "tp small" }, `${s.units.length}단원 · ${st.done}/${st.total} 풂`),
+      dots(s.units.map(allItems)));
   }
 
   function viewHome(app) {
-    app.append(h("section", { class: "hero" },
-      h("h1", {}, "오늘도 한 문제씩 🌱"),
-      h("p", {}, "과목을 고르고 단원별로 풀어 보세요. 답을 입력하면 바로 채점돼요.")));
-
-    const wrong = Object.values(progress).filter((v) => v === "x").length;
-    if (wrong) {
-      app.append(h("a", { class: "callout", href: "#/wrong" }, `📝 틀린 문제가 ${wrong}개 있어요. 오답노트에서 다시 풀어 볼까요?`));
+    const last = getLast();
+    const lu = last && findUnit(last[0], last[1]);
+    const hero = h("div", { class: "hero" });
+    if (lu && lu.u) {
+      hero.append(h("a", { class: "qtile pri", href: `#/s/${lu.s.id}/${lu.u.id}` }, h("b", {}, "이어서 풀기"), h("span", {}, `${lu.s.name} · ${lu.u.title}`)));
+    } else {
+      const s0 = subjects.find((x) => !x.href);
+      if (s0) hero.append(h("a", { class: "qtile pri", href: `#/s/${s0.id}/${s0.units[0].id}` }, h("b", {}, "처음부터 시작"), h("span", {}, `${s0.name} · ${s0.units[0].title}`)));
     }
-
     const examSubjects = subjects.filter((s) => s.exam);
+    const scope = h("div", { class: "scope hidden" }, examSubjects.map((s) =>
+      h("a", { class: "scope-row", href: subjectHref(s) }, h("b", {}, s.name), examBox(s))));
+    hero.append(
+      h("button", { class: "qtile exam-tile", onclick: () => scope.classList.toggle("hidden") }, h("b", {}, "시험범위"), h("span", {}, "2학년 2학기 1차 · 과목별 범위")),
+      h("a", { class: "qtile" + (wrongCount() ? " warn" : ""), href: "#/wrong" }, h("b", {}, "오답노트"), h("span", {}, `${wrongCount()}문항`)));
+    app.append(hero, scope);
+
+    app.append(h("div", { class: "secthd" }, h("b", {}, "시험 과목"), legend()));
+    app.append(h("div", { class: "ugrid" }, examSubjects.map(subjectTile)));
     const others = subjects.filter((s) => !s.exam);
-    if (examSubjects.length) {
-      app.append(h("h2", { class: "section-title" }, "2학년 2학기 1차 시험"));
-      app.append(h("div", { class: "subject-grid" }, examSubjects.map(subjectCard)));
-      const table = h("div", { class: "exam-table" }, examSubjects.map((s) =>
-        h("a", { class: "exam-row", href: `#/s/${s.id}`, style: `--c:${s.color}` },
-          h("div", { class: "exam-name" }, s.name), examBox(s))));
-      app.append(h("details", { class: "scope" }, h("summary", {}, "📅 과목별 시험범위 보기"), table));
+    if (others.length) {
+      app.append(h("div", { class: "secthd" }, h("b", {}, "더 공부하기")));
+      app.append(h("div", { class: "ugrid" }, others.map(subjectTile)));
     }
-    app.append(h("h2", { class: "section-title" }, "더 공부하기"));
-    const grid = h("div", { class: "subject-grid" }, others.map(subjectCard));
-    grid.append(h("div", { class: "subject-card soon" },
-      h("div", { class: "subject-icon" }, "+"),
-      h("div", { class: "subject-name" }, "새 과목"),
-      h("div", { class: "subject-desc" }, "필요한 과목은 계속 추가할 수 있어요")));
-    app.append(grid);
   }
 
-  // ───────────────────────── 화면: 과목(단원 목록)
+  // ───────────────────────── 화면: 과목(단원 고르기)
   function viewSubject(app, sid) {
     const s = subjects.find((x) => x.id === sid);
-    if (!s) return viewNotFound(app);
-    app.append(h("nav", { class: "crumbs" }, h("a", { href: "#/" }, "홈"), " / ", s.name));
-    app.append(h("h1", { class: "page-title", style: `--c:${s.color}` }, h("span", { class: "dot" }, s.icon), s.name));
-    app.append(h("p", { class: "muted" }, s.desc));
-    if (s.exam) app.append(h("h2", { class: "section-title" }, "시험범위"), examBox(s));
-    const list = h("div", { class: "unit-list" });
-    s.units.forEach((u, i) => {
+    if (!s || s.href) return viewNotFound(app);
+    const next = firstOpenUnit(s);
+    const items = s.units.flatMap(allItems);
+    const started = stats(items).done > 0;
+    const hero = h("div", { class: "hero" },
+      h("a", { class: "qtile pri", href: `#/s/${s.id}/${next.id}` },
+        h("b", {}, started ? "이어서 풀기" : "처음부터 시작"), h("span", {}, next.title)),
+      h("a", { class: "qtile" + (wrongCount(items) ? " warn" : ""), href: `#/wrong/${s.id}` },
+        h("b", {}, "오답노트"), h("span", {}, `${wrongCount(items)}문항`)));
+    app.append(hero);
+    if (s.exam) app.append(h("div", { class: "scope" }, h("div", { class: "scope-row" }, h("b", {}, "시험범위"), examBox(s))));
+
+    app.append(h("div", { class: "secthd" }, h("b", {}, "단원 고르기"), legend()));
+    app.append(h("div", { class: "ugrid" }, s.units.map((u) => {
       const st = stats(allItems(u));
-      list.append(h("a", { class: "unit-row", href: `#/s/${s.id}/${u.id}`, style: `--c:${s.color}` },
-        h("div", { class: "unit-no" }, /^\d/.test(u.id) ? u.id : String(i + 1)),
-        h("div", { class: "unit-body" },
-          h("div", { class: "unit-title" }, u.title),
-          h("div", { class: "unit-sub" }, `${u.sub || ""}${u.sub ? " · " : ""}${st.total}문제`),
-          bar(st, s.color)),
-        h("div", { class: "unit-score" }, st.done ? `${st.o}/${st.total}` : "")));
-    });
-    app.append(list);
+      const done = st.total && st.done === st.total && st.o / st.total >= 0.8;
+      return h("a", { class: "utile" + (done ? " done" : ""), href: `#/s/${s.id}/${u.id}` },
+        h("div", { class: "no" }, /^\d/.test(u.id) ? `${u.id}단원` : u.title),
+        h("div", { class: "tp" }, /^\d/.test(u.id) ? u.title : (u.sub || "")),
+        h("div", { class: "tp small" }, `${u.sub && /^\d/.test(u.id) ? u.sub + " · " : ""}${st.done}/${st.total}`),
+        dots(u.groups.map((g) => g.items)));
+    })));
   }
 
   // ───────────────────────── 화면: 단원(문제 풀이)
@@ -249,8 +297,9 @@
     if (!u) return viewNotFound(app);
     const items = allItems(u);
     const idx = s.units.indexOf(u);
+    setLast(s.id, u.id);
 
-    app.append(h("nav", { class: "crumbs" }, h("a", { href: "#/" }, "홈"), " / ", h("a", { href: `#/s/${s.id}` }, s.name), " / ", u.title));
+    app.append(h("nav", { class: "crumbs" }, h("a", { href: `#/s/${s.id}` }, `← ${s.name} 단원 목록`)));
     const head = h("div", { class: "unit-head", style: `--c:${s.color}` },
       h("h1", { class: "page-title" }, u.title),
       h("div", { class: "muted" }, u.sub || ""));
@@ -438,12 +487,12 @@
   }
 
   // ───────────────────────── 화면: 오답노트
-  function viewWrong(app) {
-    app.append(h("nav", { class: "crumbs" }, h("a", { href: "#/" }, "홈"), " / 오답노트"));
-    app.append(h("h1", { class: "page-title" }, "📝 오답노트"));
-    app.append(h("p", { class: "muted" }, "틀린 문제만 모았어요. 다시 풀어서 맞히면 목록에서 빠져요 (새로고침 시)."));
+  function viewWrong(app, sid) {
+    const only = subjects.find((x) => x.id === sid);
+    app.append(h("h1", { class: "page-title" }, "오답노트", only ? ` · ${only.name}` : ""));
+    app.append(h("p", { class: "muted" }, "틀린 문제만 모았어요. 다시 풀어서 맞히면 다음에 열 때 목록에서 빠져요."));
     let count = 0;
-    subjects.forEach((s) => {
+    (only ? [only] : subjects).forEach((s) => {
       s.units.forEach((u) => {
         u.groups.forEach((g, gi) => {
           const its = g.items.filter((it) => progress[it.id] === "x");
@@ -468,11 +517,11 @@
     const parts = route.split("/").filter(Boolean).map(decodeURIComponent);
     const y = route === lastRoute ? window.scrollY : 0;
     app.replaceChildren();
+    renderTop(parts[0] === "s" || parts[0] === "wrong" ? parts[1] : null);
     if (parts[0] === "s" && parts[2]) viewUnit(app, parts[1], parts[2]);
     else if (parts[0] === "s" && parts[1]) viewSubject(app, parts[1]);
-    else if (parts[0] === "wrong") viewWrong(app);
+    else if (parts[0] === "wrong") viewWrong(app, parts[1]);
     else viewHome(app);
-    updateWrongBadge();
     window.scrollTo(0, y);
     lastRoute = route;
   }
