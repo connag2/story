@@ -1,0 +1,5 @@
+{"schema":"study-pack-index@1","packs":[
+ {"id":"mock-2026-09-g2","file":"packs/mock-2026-09-g2.json","title":"2026 9월 고2 모의고사","short":"26년 9월 모의","scope":"20~24 · 29~40번"},
+ {"id":"mock-2025-09-g2","file":"packs/mock-2025-09-g2.json","title":"2025 9월 고2 모의고사","short":"25년 9월 모의","scope":"29~42번"},
+ {"id":"bisang-eng2-l1-2","file":"packs/bisang-eng2-l1-2.json","title":"비상(홍민표) 영어II 1·2과","short":"비상 1·2과","scope":"1·2과 본문 + 본문 외 지문"}
+]}
