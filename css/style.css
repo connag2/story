@@ -237,3 +237,11 @@ code { font-family: ui-monospace, Menlo, Consolas, monospace; background: var(--
 .score .big { font-size: 44px; font-weight: 800; color: var(--blue); line-height: 1.2; }
 .hrow { display: grid; grid-template-columns: minmax(90px, 200px) 48px 1fr; gap: 10px; align-items: center; font-size: 14px; margin-top: 8px; }
 .hrow .bar { margin: 0; }
+
+/* ── 긴 지문 (모의고사) */
+.passage p { margin: 0 0 8px; text-indent: .6em; }
+.passage > b { display: block; margin: 10px 0 4px; }
+.passage > b:first-child { margin-top: 0; }
+.boxed { border: 1.5px solid var(--ink); padding: 0 3px; }
+.mark { font-weight: 700; color: var(--blue); }
+.group-q .passage { max-height: 70vh; overflow-y: auto; }

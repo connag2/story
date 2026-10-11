@@ -15,7 +15,7 @@ globalThis.addEventListener = () => {};
 globalThis.document = { addEventListener() {}, getElementById() { return null; }, visibilityState: "visible" };
 globalThis.setInterval = () => 0;
 require("../js/app.js");
-for (const f of ["reading", "math", "english", "programming", "korean"]) require(`../data/${f}.js`);
+for (const f of ["reading", "reading-mock-2026-09", "math", "english", "programming", "korean"]) require(`../data/${f}.js`);
 require("../js/sync.js");
 const { same, subjects } = STORY._check;
 const { merge } = STORY._sync;

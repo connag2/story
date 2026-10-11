@@ -1,9 +1,9 @@
 // 오프라인 지원: 한 번 연 화면·문제·그림은 인터넷이 없어도 열려요.
 // 파일을 바꾸면 VERSION 을 올려 주세요(옛 캐시를 지움).
-const VERSION = "story-v1";
+const VERSION = "story-v2";
 const CORE = [
   "./", "index.html", "css/style.css", "js/app.js", "js/sync.js",
-  "data/reading.js", "data/math.js", "data/english.js", "data/programming.js", "data/korean.js",
+  "data/reading.js", "data/reading-mock-2026-09.js", "data/math.js", "data/english.js", "data/programming.js", "data/korean.js",
   "vendor/katex/katex.min.css", "vendor/katex/katex.min.js", "vendor/katex/auto-render.min.js",
   "manifest.webmanifest", "assets/icons/icon-192.png",
 ];

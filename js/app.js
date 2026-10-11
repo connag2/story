@@ -13,6 +13,17 @@
       });
       subjects.push(s);
     },
+    // 다른 파일에서 과목에 단원을 덧붙일 때 (예: data/reading-mock-2026-09.js)
+    addUnits(sid, units) {
+      const s = subjects.find((x) => x.id === sid);
+      if (!s) throw new Error(`과목 ${sid} 이 먼저 등록되어야 해요`);
+      units.forEach((u) => {
+        u.groups.forEach((g, gi) => {
+          g.items = g.items.map((it, ii) => toItem(it, `${s.id}/${u.id}/${gi}-${ii}`, s.mathInput));
+        });
+        s.units.push(u);
+      });
+    },
   };
 
   // [라벨, 문제, 정답(표시용), 인정 답(문자열|배열|null), 옵션] → 객체
@@ -401,7 +412,7 @@
     if (g.q) card.append(h("div", { class: "group-q", html: g.q }));
     const figs = images(s, g.img, g.imgLabels);
     if (figs) card.append(figs);
-    const solo = g.items.length === 1 && !its[0].label && !its[0].q;
+    const solo = g.wide || (g.items.length === 1 && !its[0].label && !its[0].q);
     const wrap = h("div", { class: "items" + (solo ? " solo" : "") });
     its.forEach((it) => wrap.append(itemCard(s, it, g, onChange)));
     card.append(wrap);
