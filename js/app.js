@@ -24,17 +24,25 @@
   }
 
   // ───────────────────────── 저장소
-  const KEY = "story-progress-v1";
-  let progress = {};
-  try { progress = JSON.parse(localStorage.getItem(KEY)) || {}; } catch (e) { progress = {}; }
+  // progress: { 문제id: "o" | "x" },  times: { 문제id: 마지막으로 바꾼 시각 } — 기기 간 동기화 때 최신 것을 고르는 데 씀
+  const KEY = "story-progress-v1", TKEY = "story-progress-t-v1", DKEY = "story-daily-v1";
+  const load = (k) => { try { return JSON.parse(localStorage.getItem(k)) || {}; } catch (e) { return {}; } };
+  const store = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* 저장 불가 환경 */ } };
+  let progress = load(KEY), times = load(TKEY);
+  const listeners = [];
   function save() {
-    try { localStorage.setItem(KEY, JSON.stringify(progress)); } catch (e) { /* 저장 불가 환경 */ }
+    store(KEY, progress); store(TKEY, times);
+    listeners.forEach((f) => f());
   }
-  function setState(id, st) {
-    if (st) progress[id] = st; else delete progress[id];
+  const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
+  function setStates(ids, st) {
+    const now = Date.now();
+    ids.forEach((id) => { if (st) progress[id] = st; else delete progress[id]; times[id] = now; });
+    if (st) { const d = load(DKEY); d[today()] = (d[today()] || 0) + ids.length; store(DKEY, d); }
     save();
     renderTop(currentSid);
   }
+  const setState = (id, st) => setStates([id], st);
 
   // ───────────────────────── 채점
   function norm(s, math) {
@@ -208,7 +216,10 @@
         h("a", { class: "ttl", href: s ? `#/s/${s.id}` : "#/" },
           h("div", { class: "htt" }, s ? s.name : "📚 스토리 공부방"),
           h("div", { class: "hts" }, `${s ? s.units.length + "단원 · " : ""}${st.done}/${st.total} 문항 풂`)),
-        h("a", { class: "ib", id: "nav-wrong", href: s ? `#/wrong/${s.id}` : "#/wrong" }, "오답")),
+        h("div", { class: "topbtns" },
+          h("button", { class: "ib ghost", id: "acct", type: "button", onclick: () => window.STORY.openAccount && window.STORY.openAccount() },
+            (window.STORY.accountLabel && window.STORY.accountLabel()) || "로그인"),
+          h("a", { class: "ib", id: "nav-wrong", href: s ? `#/wrong/${s.id}` : "#/wrong" }, "오답"))),
       h("nav", { class: "packsel" },
         h("a", { class: "chip" + (!s ? " on" : ""), href: "#/" }, "홈"),
         subjects.map((x) => h("a", { class: "chip" + (x === s ? " on" : ""), href: subjectHref(x) }, x.name + (x.href ? " ↗" : "")))));
@@ -319,7 +330,7 @@
       h("button", {
         class: "btn ghost", onclick: () => {
           if (!confirm("이 단원의 채점 기록을 모두 지울까요?")) return;
-          items.forEach((it) => delete progress[it.id]); save(); updateWrongBadge(); render();
+          setStates(items.map((it) => it.id), null); render();
         },
       }, "기록 초기화"));
     head.append(summary, tools);
@@ -529,6 +540,12 @@
   window.addEventListener("hashchange", render);
   document.addEventListener("DOMContentLoaded", render);
 
+  // 다른 스크립트(js/sync.js 등)와 주고받는 통로
+  Object.assign(window.STORY, {
+    onChange: (f) => listeners.push(f),
+    reload() { progress = load(KEY); times = load(TKEY); render(); },
+    today, load,
+  });
   // 테스트용
   window.STORY._check = { norm, same, evalNum, subjects };
 })();
