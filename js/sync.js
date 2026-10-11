@@ -260,6 +260,8 @@
 
   // ── 자동 동기화: 처음 열 때, 문제를 풀 때(4초 뒤), 화면을 떠날 때, 2분마다
   S.onChange(() => later());
+  // 공부방 안에 띄운 영어 공부장(같은 사이트)이 기록을 바꾸면 여기로 알림이 옴
+  window.addEventListener("storage", (e) => { if (e.key && SYNCABLE(e.key)) later(); });
   document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") sync(); else later(300); });
   window.addEventListener("online", () => later(300));
   setInterval(() => { if (document.visibilityState === "visible") sync(); }, 120000);

@@ -245,3 +245,77 @@ code { font-family: ui-monospace, Menlo, Consolas, monospace; background: var(--
 .boxed { border: 1.5px solid var(--ink); padding: 0 3px; }
 .mark { font-weight: 700; color: var(--blue); }
 .group-q .passage { max-height: 70vh; overflow-y: auto; }
+
+/* ── 단원 화면: 영어 공부장처럼 단계 탭 + 한 문제씩 */
+.container { padding-bottom: 110px; }
+.uhead { margin: 2px 0 12px; }
+.uhrow { display: flex; align-items: center; gap: 10px; }
+.uhrow .back { min-width: 40px; font-size: 18px; }
+.uht { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.35; }
+.uht b { font-size: 18px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.uht span { font-size: 12.5px; color: var(--ink2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.steps { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; margin: 10px 0 6px; }
+.steps::-webkit-scrollbar { display: none; }
+.step {
+  flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 10px;
+  text-decoration: none; color: var(--ink2); font-size: 14px; font-weight: 500;
+}
+.step .n { width: 18px; height: 18px; border: 1px solid currentColor; border-radius: 50%; display: inline-grid; place-items: center; font-size: 11px; font-weight: 700; }
+.step.on { background: var(--blue); color: #fff; font-weight: 700; }
+.usum { font-size: 12.5px; color: var(--ink2); }
+
+.focus { display: block; }
+.fcard { border-color: var(--blue); box-shadow: 0 6px 22px rgba(47, 107, 255, .10); }
+.fcard .item { border: 0; padding: 4px 0 0; background: transparent; }
+.fcard .item.is-o, .fcard .item.is-x { border: 1.5px solid; padding: 12px; }
+.fcard .item.is-o { border-color: var(--green); background: var(--greenbg); }
+.fcard .item.is-x { border-color: var(--red); background: var(--redbg); }
+.fcard .keys { display: flex; }
+.passbtn { align-self: flex-start; margin: -2px 0 10px; }
+.pside { display: none; }
+@media (min-width: 980px) {
+  .container:has(.focus.has-passage) { max-width: 1180px; }
+  .focus.has-passage { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+  .focus.has-passage .pside {
+    display: block; position: sticky; top: 120px; max-height: calc(100dvh - 220px); overflow-y: auto;
+    background: #fff; border: 2px solid var(--rule); border-radius: 14px; padding: 4px;
+  }
+  .focus.has-passage .pside .passage { margin: 0; border-radius: 10px; }
+  .focus.has-passage .passbtn { display: none; }
+}
+
+.bottombar {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 20;
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 10px max(16px, calc((100vw - 728px) / 2)); padding-bottom: max(10px, env(safe-area-inset-bottom));
+  background: rgba(255, 255, 255, .96); backdrop-filter: blur(6px); border-top: 1px solid var(--rule);
+}
+.bottombar .btn { min-height: 44px; }
+.bottombar .btn.big { margin: 0; }
+.pmid { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 14px; }
+.pdots { display: flex; flex-wrap: wrap; justify-content: center; gap: 5px; max-height: 26px; overflow: hidden; }
+.pdot { width: 8px; height: 8px; padding: 0; border: 0; border-radius: 50%; background: var(--rule); cursor: pointer; }
+.pdot.o { background: var(--green); }
+.pdot.x { background: var(--red); }
+.pdot.cur { outline: 2px solid var(--blue); outline-offset: 1px; background: var(--blue); }
+.btn:disabled { opacity: .4; cursor: default; }
+.btn.pulse { box-shadow: 0 0 0 4px rgba(47, 107, 255, .2); }
+
+/* 지문 */
+.mbox.wide { width: min(760px, 100%); }
+.mbox .mbd .passage { margin: 0; }
+.topic { padding: 10px 14px; border-left: 3px solid var(--blue); background: var(--bluebg); border-radius: 0 10px 10px 0; margin: 4px 0 10px; display: flex; flex-direction: column; }
+.group.read .full .passage { max-height: none; font-size: 16px; line-height: 1.9; }
+.pdet { margin: 4px 0 10px; }
+.pdet summary { cursor: pointer; font-weight: 700; color: var(--blue); margin-bottom: 6px; }
+
+/* 영어 공부장을 품은 화면 */
+.top.compact .toprow { display: none; }
+body.embedded .foot { display: none; }
+body.embedded .container { padding: 0; }
+.embed-frame { position: fixed; left: 0; top: 60px; width: 100%; height: calc(100dvh - 60px); border: 0; background: var(--paper); }
+@media (max-width: 520px) {
+  .bottombar { gap: 6px; }
+  .bottombar .btn { padding: 8px 12px; }
+}
+.pdet .passage { max-height: 60vh; overflow-y: auto; }
