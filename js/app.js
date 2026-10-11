@@ -247,7 +247,36 @@
       dots(s.units.map(allItems)));
   }
 
+  // ───────────────────────── 오늘 · 연속 학습 · 시험 D-day
+  const SKEY = "story-settings-v1";
+  function todayCard() {
+    const daily = load(DKEY), set = load(SKEY);
+    const n = daily[today()] || 0;
+    let streak = 0;
+    const d = new Date();
+    if (!n) d.setDate(d.getDate() - 1);            // 오늘 아직 안 풀었으면 어제까지 이어진 날 수
+    for (;;) {
+      const k = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      if (!daily[k]) break;
+      streak++; d.setDate(d.getDate() - 1);
+    }
+    let dday = null;
+    if (set.examDate) {
+      const diff = Math.round((new Date(set.examDate + "T00:00:00") - new Date(today() + "T00:00:00")) / 864e5);
+      dday = diff > 0 ? `D-${diff}` : diff === 0 ? "D-DAY" : `D+${-diff}`;
+    }
+    const input = h("input", {
+      type: "date", class: "date-in", value: set.examDate || "", "aria-label": "시험 날짜",
+      onchange: (e) => { const v = load(SKEY); v.examDate = e.target.value || undefined; store(SKEY, v); save(); render(); },
+    });
+    return h("div", { class: "today" },
+      h("label", { class: "tcell dday" }, h("b", {}, dday || "D-?"), h("span", {}, dday ? "시험까지" : "시험 날짜 정하기"), input),
+      h("div", { class: "tcell" }, h("b", {}, String(n)), h("span", {}, "오늘 푼 문제")),
+      h("div", { class: "tcell" }, h("b", {}, `${streak}일`), h("span", {}, "연속 공부")));
+  }
+
   function viewHome(app) {
+    app.append(todayCard());
     const last = getLast();
     const lu = last && findUnit(last[0], last[1]);
     const hero = h("div", { class: "hero" });
@@ -284,6 +313,8 @@
     const hero = h("div", { class: "hero" },
       h("a", { class: "qtile pri", href: `#/s/${s.id}/${next.id}` },
         h("b", {}, started ? "이어서 풀기" : "처음부터 시작"), h("span", {}, next.title)),
+      h("a", { class: "qtile exam-tile", href: `#/test/${s.id}` },
+        h("b", {}, "시험 보기"), h("span", {}, "단원 골라 실전처럼 · 시간 제한")),
       h("a", { class: "qtile" + (wrongCount(items) ? " warn" : ""), href: `#/wrong/${s.id}` },
         h("b", {}, "오답노트"), h("span", {}, `${wrongCount(items)}문항`)));
     app.append(hero);
@@ -516,6 +547,186 @@
     if (!count) app.append(h("div", { class: "empty" }, "틀린 문제가 없어요. 멋져요! 🎉"));
   }
 
+  // ───────────────────────── 화면: 시험 보기
+  // 채점 가능한 문제(입력·선택)만 골라 한 번에 풀고 제출하면 점수와 해설을 보여 줌
+  let testRun = null;
+  function testPool(s, unitIds) {
+    const out = [];
+    s.units.forEach((u) => {
+      if (!unitIds.has(u.id)) return;
+      u.groups.forEach((g, gi) => g.items.forEach((it) => { if (it.type !== "self") out.push({ it, g, u, gi }); }));
+    });
+    return out;
+  }
+  function viewTest(app, sid) {
+    const s = subjects.find((x) => x.id === sid);
+    if (!s || s.href) return viewNotFound(app);
+    if (testRun && testRun.sid === sid) return testRun.done ? viewTestResult(app, s) : viewTestRun(app, s);
+
+    app.append(h("nav", { class: "crumbs" }, h("a", { href: `#/s/${s.id}` }, `← ${s.name} 단원 목록`)));
+    app.append(h("h1", { class: "page-title" }, "시험 보기"));
+    app.append(h("p", { class: "muted" }, "채점 없이 끝까지 풀고 한 번에 제출해요. 틀린 문제는 오답노트에 들어가요."));
+    const picked = new Set(s.units.map((u) => u.id));
+    const opts = { count: 20, limit: 0, wrongOnly: false };
+    const info = h("div", { class: "muted small" });
+    const refresh = () => {
+      let pool = testPool(s, picked);
+      if (opts.wrongOnly) pool = pool.filter((x) => progress[x.it.id] === "x");
+      info.textContent = `고른 범위의 문제 ${pool.length}개 중 ${Math.min(opts.count || pool.length, pool.length)}개를 무작위로 내요.`;
+      return pool;
+    };
+    const unitBox = h("div", { class: "picks" }, s.units.map((u) => {
+      const b = h("button", { class: "chip on", type: "button", onclick: () => {
+        picked.has(u.id) ? picked.delete(u.id) : picked.add(u.id);
+        b.classList.toggle("on", picked.has(u.id)); refresh();
+      } }, /^\d/.test(u.id) ? `${u.id}. ${u.title}` : u.title);
+      return b;
+    }));
+    const seg = (label, key, values) => h("div", { class: "seg" }, h("b", {}, label), values.map(([v, t]) => {
+      const b = h("button", { class: "chip" + (opts[key] === v ? " on" : ""), type: "button", onclick: () => {
+        opts[key] = v; b.parentNode.querySelectorAll(".chip").forEach((c) => c.classList.remove("on")); b.classList.add("on"); refresh();
+      } }, t);
+      return b;
+    }));
+    app.append(h("div", { class: "group" },
+      h("div", { class: "seg" }, h("b", {}, "범위"),
+        h("button", { class: "link", type: "button", onclick: () => { s.units.forEach((u) => picked.add(u.id)); unitBox.querySelectorAll(".chip").forEach((c) => c.classList.add("on")); refresh(); } }, "전체"),
+        h("button", { class: "link", type: "button", onclick: () => { picked.clear(); unitBox.querySelectorAll(".chip").forEach((c) => c.classList.remove("on")); refresh(); } }, "모두 빼기")),
+      unitBox,
+      seg("문제 수", "count", [[10, "10"], [20, "20"], [30, "30"], [0, "전부"]]),
+      seg("시간", "limit", [[0, "제한 없음"], [10, "10분"], [20, "20분"], [30, "30분"], [50, "50분"]]),
+      h("label", { class: "toggle" }, h("input", { type: "checkbox", onchange: (e) => { opts.wrongOnly = e.target.checked; refresh(); } }), " 전에 틀린 문제만"),
+      info,
+      h("button", { class: "btn big", type: "button", onclick: () => {
+        const pool = shuffle(refresh());
+        if (!pool.length) { info.textContent = "고른 범위에 문제가 없어요."; return; }
+        const qs = opts.count ? pool.slice(0, opts.count) : pool;
+        testRun = { sid, qs, ans: {}, start: Date.now(), limit: opts.limit * 60000, done: false };
+        render();
+      } }, "시작하기")));
+    refresh();
+  }
+
+  let tick = 0;
+  function viewTestRun(app, s) {
+    const run = testRun;
+    const bar = h("div", { class: "testbar" });
+    const paintBar = () => {
+      const answered = run.qs.filter((q) => run.ans[q.it.id] != null && run.ans[q.it.id] !== "").length;
+      const el = Date.now() - run.start;
+      const left = run.limit ? Math.max(0, run.limit - el) : null;
+      const mm = (ms) => `${Math.floor(ms / 60000)}:${String(Math.floor(ms / 1000) % 60).padStart(2, "0")}`;
+      bar.replaceChildren(
+        h("span", {}, `${answered}/${run.qs.length} 답함`),
+        h("span", { class: left !== null && left < 60000 ? "warn" : "" }, left !== null ? `남은 시간 ${mm(left)}` : `${mm(el)} 지남`),
+        h("button", { class: "btn", type: "button", onclick: () => finish(false) }, "제출"));
+      if (left === 0) finish(true);
+    };
+    const finish = (timeout) => {
+      if (run.done) return;
+      const left = run.qs.filter((q) => run.ans[q.it.id] == null || run.ans[q.it.id] === "").length;
+      if (!timeout && left && !confirm(`아직 ${left}문제를 안 풀었어요. 제출할까요?`)) return;
+      clearInterval(tick);
+      run.done = true; run.end = Date.now(); run.timeout = timeout;
+      const right = [], wrong = [];
+      run.qs.forEach((q) => {
+        const a = run.ans[q.it.id];
+        let ok = false;
+        if (q.it.type === "input") ok = a != null && a !== "" && checkInput(q.it, a);
+        else if (q.it.type === "choice") ok = a === q.it.ok[0];
+        else if (q.it.type === "multi") { const set = new Set(a || []); ok = set.size === q.it.ok.length && q.it.ok.every((c) => set.has(c)); }
+        q.ok = ok; (ok ? right : wrong).push(q.it.id);
+      });
+      if (right.length) setStates(right, "o");
+      if (wrong.length) setStates(wrong, "x");
+      window.scrollTo(0, 0); render();
+    };
+    clearInterval(tick); tick = setInterval(() => { if (!document.body.contains(bar)) clearInterval(tick); else paintBar(); }, 1000);
+    paintBar();
+    app.append(bar);
+
+    run.qs.forEach((q, k) => {
+      const card = h("section", { class: "group" });
+      card.append(h("div", { class: "group-head" }, h("span", { class: "group-no" }, k + 1),
+        q.g.stars ? h("span", { class: "stars" }, stars(q.g.stars)) : null, h("span", { class: "src" }, q.u.title)));
+      if (q.g.q) card.append(h("div", { class: "group-q", html: q.g.q }));
+      const figs = images(s, q.g.img, q.g.imgLabels); if (figs) card.append(figs);
+      const item = h("div", { class: "item" });
+      if (q.it.label || q.it.q) item.append(h("div", { class: "item-q" }, q.it.label ? h("span", { class: "label" }, q.it.label) : null, q.it.q ? h("span", { html: q.it.q }) : null));
+      const f2 = images(s, q.it.img); if (f2) item.append(f2);
+      if (q.it.type === "input") {
+        item.append(h("input", { class: "answer-input", type: "text", autocomplete: "off", autocapitalize: "off", spellcheck: "false",
+          placeholder: "답 입력", value: run.ans[q.it.id] || "", oninput: (e) => { run.ans[q.it.id] = e.target.value; } }));
+      } else {
+        const choices = q.choices || (q.choices = q.it.shuffle ? shuffle(q.it.choices) : q.it.choices);
+        const multi = q.it.type === "multi";
+        const box = h("div", { class: "choices" + (choices.some((c) => c.length > 14) ? " long" : "") });
+        choices.forEach((c) => {
+          const cur = run.ans[q.it.id];
+          const on = multi ? (cur || []).includes(c) : cur === c;
+          const b = h("button", { class: "choice" + (on ? " on" : ""), type: "button", html: c, onclick: () => {
+            if (multi) {
+              const set = new Set(run.ans[q.it.id] || []); set.has(c) ? set.delete(c) : set.add(c);
+              run.ans[q.it.id] = [...set]; b.classList.toggle("on", set.has(c));
+            } else {
+              run.ans[q.it.id] = c; box.querySelectorAll(".choice").forEach((x) => x.classList.remove("on")); b.classList.add("on");
+            }
+          } });
+          box.append(b);
+        });
+        if (multi) item.append(h("div", { class: "muted small" }, "있는 대로 모두 고르세요"));
+        item.append(box);
+      }
+      card.append(item);
+      typeset(card);
+      app.append(card);
+    });
+    app.append(h("div", { class: "pager" }, h("span"), h("button", { class: "btn big", type: "button", onclick: () => finish(false) }, "제출하기")));
+  }
+
+  function viewTestResult(app, s) {
+    const run = testRun;
+    const right = run.qs.filter((q) => q.ok).length;
+    const pct = Math.round((right / run.qs.length) * 100);
+    const mins = Math.max(1, Math.round((run.end - run.start) / 60000));
+    app.append(h("div", { class: "score" },
+      h("div", { class: "big" }, `${pct}점`),
+      h("div", {}, `${run.qs.length}문제 중 ${right}개 맞음 · ${mins}분${run.timeout ? " · 시간 종료" : ""}`)));
+    // 단원별 정답률
+    const byUnit = new Map();
+    run.qs.forEach((q) => { const r = byUnit.get(q.u) || { n: 0, o: 0 }; r.n++; if (q.ok) r.o++; byUnit.set(q.u, r); });
+    app.append(h("div", { class: "group" }, h("b", {}, "단원별 정답률"),
+      [...byUnit].map(([u, r]) => h("div", { class: "hrow" },
+        h("span", {}, u.title), h("span", { class: "muted" }, `${r.o}/${r.n}`),
+        h("div", { class: "bar" }, h("span", { class: "bar-o", style: `width:${Math.round((r.o / r.n) * 100)}%` }))))));
+    const wrong = run.qs.filter((q) => !q.ok);
+    app.append(h("div", { class: "row" },
+      wrong.length ? h("button", { class: "btn", type: "button", onclick: () => {
+        testRun = { sid: run.sid, qs: shuffle(wrong.map((q) => ({ it: q.it, g: q.g, u: q.u, gi: q.gi }))), ans: {}, start: Date.now(), limit: run.limit, done: false };
+        render();
+      } }, "틀린 것만 다시 시험") : null,
+      h("button", { class: "btn ghost", type: "button", onclick: () => { testRun = null; render(); } }, "새 시험"),
+      h("a", { class: "btn ghost", href: `#/s/${s.id}` }, "단원 목록")));
+    if (wrong.length) app.append(h("div", { class: "secthd" }, h("b", {}, `틀린 문제 ${wrong.length}개`)));
+    wrong.forEach((q) => {
+      const a = run.ans[q.it.id];
+      const mine = a == null || a === "" || (Array.isArray(a) && !a.length) ? "(안 품)" : Array.isArray(a) ? a.join(", ") : a;
+      const card = h("section", { class: "group" },
+        h("div", { class: "group-head" }, h("span", { class: "src" }, q.u.title)),
+        q.g.q ? h("div", { class: "group-q", html: q.g.q }) : null,
+        images(s, q.g.img, q.g.imgLabels),
+        h("div", { class: "item is-x" },
+          q.it.label || q.it.q ? h("div", { class: "item-q" }, q.it.label ? h("span", { class: "label" }, q.it.label) : null, q.it.q ? h("span", { html: q.it.q }) : null) : null,
+          images(s, q.it.img),
+          h("div", { class: "answer" }, h("span", { class: "muted" }, "내 답 "), h("span", { html: mine })),
+          h("div", { class: "answer" }, h("span", { class: "muted" }, "정답 "), h("span", { html: q.it.a })),
+          q.it.explain || q.g.explain ? h("div", { class: "explain", html: "💡 " + (q.it.explain || q.g.explain) }) : null,
+          q.it.type === "input" ? h("button", { class: "btn ghost small", type: "button", onclick: (e) => { setState(q.it.id, "o"); q.ok = true; e.target.closest(".group").remove(); } }, "내 답도 맞아요") : null));
+      typeset(card);
+      app.append(card);
+    });
+  }
+
   function viewNotFound(app) {
     app.append(h("div", { class: "empty" }, "페이지를 찾을 수 없어요. ", h("a", { href: "#/" }, "홈으로")));
   }
@@ -528,10 +739,11 @@
     const parts = route.split("/").filter(Boolean).map(decodeURIComponent);
     const y = route === lastRoute ? window.scrollY : 0;
     app.replaceChildren();
-    renderTop(parts[0] === "s" || parts[0] === "wrong" ? parts[1] : null);
+    renderTop(["s", "wrong", "test"].includes(parts[0]) ? parts[1] : null);
     if (parts[0] === "s" && parts[2]) viewUnit(app, parts[1], parts[2]);
     else if (parts[0] === "s" && parts[1]) viewSubject(app, parts[1]);
     else if (parts[0] === "wrong") viewWrong(app, parts[1]);
+    else if (parts[0] === "test" && parts[1]) viewTest(app, parts[1]);
     else viewHome(app);
     window.scrollTo(0, y);
     lastRoute = route;
