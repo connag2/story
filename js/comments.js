@@ -152,24 +152,41 @@
     const chosen = el("div", { class: "emo-chosen" });
     const paintChosen = () => chosen.replaceChildren(...emos.map((e, i) => el("span", { class: "emo-slot" },
       el("img", { src: e.src, alt: "" }), el("button", { class: "x", type: "button", "aria-label": "빼기", onclick: () => { emos.splice(i, 1); paintChosen(); } }, "✕"))));
-    const picker = S.emoPicker ? S.emoPicker((token, src) => { if (emos.length < 10) { emos.push({ token, src }); paintChosen(); } }) : null;
+    // 이모티콘: 글이 비어 있을 때 누르면 바로 보내기(아카콘처럼), 글을 쓰는 중이면 글에 붙이기
+    const picker = S.emoPicker ? S.emoPicker((token, src, quick) => {
+      if (quick && !ta.value.trim() && !emos.length) return send([token]);
+      if (emos.length < 10) { emos.push({ token, src }); paintChosen(); }
+    }) : null;
+    // 기본 이모지: 누르면 글자 넣는 자리에 바로 들어감 (로그인·포인트 필요 없음)
+    const QUICK = ["😀", "😂", "🥹", "😭", "😍", "🤔", "😮", "😢", "👍", "👏", "🙏", "🔥", "💯", "🎉", "❤️", "✨", "✅", "❓"];
+    const quick = el("div", { class: "quick-emo" }, QUICK.map((e) => el("button", { type: "button", tabindex: "-1", "aria-label": e,
+      onmousedown: (ev) => ev.preventDefault(),
+      onclick: () => {
+        const a = ta.selectionStart ?? ta.value.length, b = ta.selectionEnd ?? a;
+        ta.value = ta.value.slice(0, a) + e + ta.value.slice(b);
+        ta.focus(); ta.setSelectionRange(a + e.length, a + e.length);
+      } }, e)));
     const msg = el("div", { class: "msg" });
     const btn = el("button", { class: "btn" + (parent ? " small" : ""), type: "button" }, parent ? "답글 달기" : "남기기");
-    btn.addEventListener("click", async () => {
+    // Ctrl+Enter 로 보내기
+    ta.addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); send(); } });
+    btn.addEventListener("click", () => send());
+    async function send(only) {
       if (!S.isLoggedIn()) return S.openAccount();
+      if (btn.disabled) return;
       btn.disabled = true; msg.textContent = "";
       try {
-        const text = [ta.value.trim(), emos.map((e) => e.token).join("")].filter(Boolean).join(" ");
+        const text = only ? only.join("") : [ta.value.trim(), emos.map((e) => e.token).join("")].filter(Boolean).join(" ");
         await post({ action: "add", key, kind, text, parent });
         ta.value = ""; emos.length = 0; paintChosen();
         msg.textContent = "올렸어요. 고마워요!"; msg.className = "msg ok";
         onPosted();
       } catch (e) { msg.textContent = e.message; msg.className = "msg err"; }
       finally { btn.disabled = false; }
-    });
+    }
     const who = S.isLoggedIn() ? el("span", { class: "muted small", text: `${S.userName()} 님으로 남겨요` })
       : el("button", { class: "link", type: "button", onclick: () => S.openAccount() }, "로그인하면 글을 남길 수 있어요");
-    return el("div", { class: "cm-compose" + (parent ? " small" : "") }, kinds, ta, chosen, picker ? picker.panel : null,
+    return el("div", { class: "cm-compose" + (parent ? " small" : "") }, kinds, ta, quick, chosen, picker ? picker.panel : null,
       el("div", { class: "row" }, btn, picker ? picker.button : null, parent ? null : who), msg);
   }
 
