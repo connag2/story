@@ -15,7 +15,8 @@ globalThis.addEventListener = () => {};
 globalThis.document = { addEventListener() {}, getElementById() { return null; }, visibilityState: "visible" };
 globalThis.setInterval = () => 0;
 require("../js/app.js");
-for (const f of ["reading", "reading-mock-2026-09", "math", "english", "programming", "korean", "guides"]) require(`../data/${f}.js`);
+for (const f of ["reading", "reading-mock-2026-09", "math", "english", "programming", "korean", "guides",
+  "solutions-math-1", "solutions-math-2", "solutions-math-3", "solutions-reading", "solutions-programming", "solutions-korean"]) require(`../data/${f}.js`);
 require("../js/sync.js");
 const { same, subjects } = STORY._check;
 const { merge } = STORY._sync;
@@ -50,4 +51,10 @@ assert.equal(lw["sp:ui"].v, "new");
 
 for (const s of subjects) assert.ok(s.guide, `${s.id} 공부법 없음`);
 for (const s of subjects) for (const u of s.units) assert.ok(u.concept, `${s.id}/${u.id} 개념 없음`);
-console.log(`ok — 문제 ${n}개 · 모든 과목 공부법·단원 개념, 채점·동기화 규칙 통과`);
+// 풀이 과정: 해설이 없는 문제는 모두 풀이가 있어야 함 (수학은 전부)
+assert.ok(!STORY._orphanSolutions, `없는 문제의 풀이: ${STORY._orphanSolutions}`);
+for (const s of subjects) for (const u of s.units) for (const g of u.groups) for (const it of g.items) {
+  if (s.id === "math" || !(it.explain || g.explain)) assert.ok(it.steps && it.steps.length, `${it.id} 풀이 과정 없음`);
+  for (const t of it.steps || []) assert.ok((t.match(/\$/g) || []).length % 2 === 0, `${it.id} 수식 $ 짝이 안 맞음`);
+}
+console.log(`ok — 문제 ${n}개 · 모든 과목 공부법·단원 개념·풀이 과정, 채점·동기화 규칙 통과`);

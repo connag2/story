@@ -191,7 +191,7 @@
     const e = document.createElement(tag);
     for (const [k, v] of Object.entries(attrs)) {
       if (k === "class") e.className = v;
-      else if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
+      else if (k.startsWith("on") && typeof v === "function") e.addEventListener(k.slice(2), v);
       else e.setAttribute(k, v);
     }
     e.append(...kids.flat().filter((x) => x != null));
