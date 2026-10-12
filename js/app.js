@@ -13,6 +13,17 @@
       });
       subjects.push(s);
     },
+    // 과목 공부법 + 단원별 개념 설명 (data/guides.js)
+    //   { how: "과목 공부법 html", units: { 단원id: "개념 html" } }
+    addGuide(sid, g) {
+      const s = subjects.find((x) => x.id === sid);
+      if (!s) throw new Error(`과목 ${sid} 이 먼저 등록되어야 해요`);
+      s.guide = g.how;
+      Object.entries(g.units || {}).forEach(([uid, html]) => {
+        const u = s.units.find((x) => x.id === uid);
+        if (u) u.concept = html;
+      });
+    },
     // 다른 파일에서 과목에 단원을 덧붙일 때 (예: data/reading-mock-2026-09.js)
     addUnits(sid, units) {
       const s = subjects.find((x) => x.id === sid);
@@ -320,9 +331,15 @@
       h("a", { class: "scope-row", href: subjectHref(s) }, h("b", {}, s.name), examBox(s))));
     hero.append(
       h("button", { class: "qtile exam-tile", onclick: () => scope.classList.toggle("hidden") }, h("b", {}, "시험범위"), h("span", {}, "2학년 2학기 1차 · 과목별 범위")),
-      h("a", { class: "qtile" + (wrongCount() ? " warn" : ""), href: "#/wrong" }, h("b", {}, "오답노트"), h("span", {}, `${wrongCount()}문항`)));
+      h("a", { class: "qtile" + (wrongCount() ? " warn" : ""), href: "#/wrong" }, h("b", {}, "오답노트"), h("span", {}, `${wrongCount()}문항`)),
+      h("a", { class: "qtile board-tile", href: "#/board" }, h("b", {}, "💬 피드백 게시판"), h("span", {}, "의견 · 나만의 공부법 · 추가 요청")));
     app.append(hero, scope);
 
+    const guided = subjects.filter((x) => x.guide);
+    if (guided.length) {
+      app.append(h("div", { class: "secthd" }, h("b", {}, "📘 과목별 공부법")));
+      app.append(h("div", { class: "picks" }, guided.map((x) => h("a", { class: "chip", href: `#/guide/${x.id}` }, x.name))));
+    }
     app.append(h("div", { class: "secthd" }, h("b", {}, "시험 과목"), legend()));
     app.append(h("div", { class: "ugrid" }, examSubjects.map(subjectTile)));
     const others = subjects.filter((s) => !s.exam);
@@ -363,6 +380,8 @@
     const hero = h("div", { class: "hero" },
       h("a", { class: "qtile pri", href: `#/s/${s.id}/${next.id}` },
         h("b", {}, started ? "이어서 풀기" : "처음부터 시작"), h("span", {}, next.title)),
+      s.guide ? h("a", { class: "qtile guide-tile", href: `#/guide/${s.id}` },
+        h("b", {}, "📘 공부법 · 개념"), h("span", {}, "무엇을 어떻게 공부할지 먼저")) : null,
       h("a", { class: "qtile exam-tile", href: `#/test/${s.id}` },
         h("b", {}, "시험 보기"), h("span", {}, "단원 골라 실전처럼 · 시간 제한")),
       h("a", { class: "qtile" + (wrongCount(items) ? " warn" : ""), href: `#/wrong/${s.id}` },
@@ -407,14 +426,16 @@
     const items = allItems(u);
     const idx = s.units.indexOf(u);
     const hasPassage = u.groups.some((g) => g.passage);
-    const step = ["read", "one", "all", "wrong"].includes(stepArg) ? stepArg
-      : hasPassage && !stats(items).done ? "read" : "one";
+    const fresh = !stats(items).done;
+    const step = ["concept", "read", "one", "all", "wrong"].includes(stepArg) ? stepArg
+      : fresh && u.concept ? "concept" : fresh && hasPassage ? "read" : "one";
     setLast(s.id, u.id);
     const base = `#/s/${s.id}/${u.id}`;
 
     // ── 머리: ← · 제목 · 단계 탭
     const st0 = stats(items);
     const steps = [
+      u.concept ? ["concept", "개념"] : null,
       hasPassage ? ["read", "지문 읽기"] : null,
       ["one", "한 문제씩"], ["all", "전체 보기"], ["wrong", `틀린 문제${st0.x ? " " + st0.x : ""}`],
     ].filter(Boolean);
@@ -433,6 +454,7 @@
         h("a", { class: "step" + (k === step ? " on" : ""), href: `${base}/${k}` }, h("span", { class: "n" }, i + 1), t))),
       summary));
 
+    if (step === "concept") return viewConcept(app, s, u, base, hasPassage);
     if (step === "read") return viewRead(app, s, u, base);
     if (step === "one") return viewOne(app, s, u, base, refreshSummary);
 
@@ -450,6 +472,42 @@
     nav.append(h("span"));
     if (idx < s.units.length - 1) nav.append(h("a", { class: "btn ghost", href: `#/s/${s.id}/${s.units[idx + 1].id}` }, `${s.units[idx + 1].title} →`));
     app.append(nav);
+  }
+
+  // ── 개념: 문제 풀기 전에 핵심 정리부터
+  function viewConcept(app, s, u, base, hasPassage) {
+    const card = h("section", { class: "group concept", html: u.concept });
+    typeset(card);
+    app.append(card);
+    if (window.STORY.commentBox) app.append(window.STORY.commentBox(`unit:${s.id}/${u.id}`, "이 단원 의견 · 나만의 공부법"));
+    app.append(h("div", { class: "bottombar" },
+      h("a", { class: "btn ghost", href: `#/guide/${s.id}` }, "📘 과목 공부법"),
+      h("a", { class: "btn big", href: `${base}/${hasPassage ? "read" : "one"}` }, hasPassage ? "개념 다 봤어요 · 지문 읽기 →" : "개념 다 봤어요 · 문제 풀기 →")));
+  }
+
+  // ── 과목 공부법 + 단원별 개념 한눈에
+  function viewGuide(app, sid) {
+    const s = subjects.find((x) => x.id === sid);
+    if (!s || !s.guide) return viewNotFound(app);
+    app.append(h("nav", { class: "crumbs" }, h("a", { href: s.embed ? "#/" : `#/s/${s.id}` }, s.embed ? "← 홈" : `← ${s.name} 단원 목록`)));
+    app.append(h("h1", { class: "page-title" }, `📘 ${s.name} 공부법`));
+    const how = h("section", { class: "group concept", html: s.guide });
+    typeset(how);
+    app.append(how);
+    const withConcept = s.units.filter((u) => u.concept);
+    if (withConcept.length) {
+      app.append(h("div", { class: "secthd" }, h("b", {}, "단원별 핵심 개념"), h("span", { class: "muted small" }, "눌러서 펼치기")));
+      withConcept.forEach((u) => {
+        const body = h("div", { class: "concept", html: u.concept });
+        let done = false;
+        app.append(h("details", { class: "cdet", ontoggle: (e) => { if (e.target.open && !done) { typeset(body); done = true; } } },
+          h("summary", {}, /^\d/.test(u.id) ? `${u.id}. ${u.title}` : u.title),
+          body,
+          h("a", { class: "btn small", href: `#/s/${s.id}/${u.id}/one` }, "이 단원 문제 풀기 →")));
+      });
+    }
+    if (s.embed) app.append(h("div", { class: "pager" }, h("span"), h("a", { class: "btn", href: `#/s/${s.id}` }, `${s.name} 공부 시작 →`)));
+    if (window.STORY.commentBox) app.append(window.STORY.commentBox(`guide:${s.id}`, `${s.name} 공부법 의견 · 나만의 공부법`));
   }
 
   // ── 지문 읽기: 지문만 쭉 읽고 문제로
@@ -893,11 +951,13 @@
     const y = route === lastRoute ? window.scrollY : 0;
     app.replaceChildren();
     document.body.classList.remove("embedded");
-    renderTop(["s", "wrong", "test"].includes(parts[0]) ? parts[1] : null);
+    renderTop(["s", "wrong", "test", "guide"].includes(parts[0]) ? parts[1] : null);
     if (parts[0] === "s" && parts[2]) viewUnit(app, parts[1], parts[2], parts[3]);
     else if (parts[0] === "s" && parts[1]) viewSubject(app, parts[1]);
     else if (parts[0] === "wrong") viewWrong(app, parts[1]);
     else if (parts[0] === "test" && parts[1]) viewTest(app, parts[1]);
+    else if (parts[0] === "guide" && parts[1]) viewGuide(app, parts[1]);
+    else if (parts[0] === "board" && window.STORY.viewBoard) window.STORY.viewBoard(app);
     else viewHome(app);
     window.scrollTo(0, y);
     lastRoute = route;

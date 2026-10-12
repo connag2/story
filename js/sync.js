@@ -386,6 +386,8 @@
   S.serverReady = () => probe || (probe = fetch("/api/auth", { method: "GET" })
     .then((r) => r.status !== 404).catch(() => false));
   S.isLoggedIn = () => !!auth;
+  S.api = api;                         // 다른 기능(댓글 등)에서 같은 로그인으로 서버 호출
+  S.userName = () => (auth ? auth.name : null);
 
   // ── 백업 파일 (로그인 없이 기기 옮기기)
   function backupSection() {
