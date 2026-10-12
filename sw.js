@@ -4,7 +4,7 @@
 const CACHE = "story";
 const CORE = [
   "./", "index.html", "css/style.css", "js/app.js", "js/sync.js",
-  "data/reading.js", "data/reading-mock-2026-09.js", "data/math.js", "data/english.js", "data/programming.js", "data/korean.js",
+  "data/reading.js", "data/reading-mock-2026-09.js", "data/math.js", "data/english.js", "data/programming.js", "data/korean.js", "data/guides.js",
   "vendor/katex/katex.min.css", "vendor/katex/katex.min.js", "vendor/katex/auto-render.min.js",
   "manifest.webmanifest", "assets/icons/icon-192.png",
 ];

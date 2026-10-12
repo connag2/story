@@ -15,7 +15,7 @@ globalThis.addEventListener = () => {};
 globalThis.document = { addEventListener() {}, getElementById() { return null; }, visibilityState: "visible" };
 globalThis.setInterval = () => 0;
 require("../js/app.js");
-for (const f of ["reading", "reading-mock-2026-09", "math", "english", "programming", "korean"]) require(`../data/${f}.js`);
+for (const f of ["reading", "reading-mock-2026-09", "math", "english", "programming", "korean", "guides"]) require(`../data/${f}.js`);
 require("../js/sync.js");
 const { same, subjects } = STORY._check;
 const { merge } = STORY._sync;
@@ -48,4 +48,6 @@ assert.deepEqual(JSON.parse(w["sp:words"].v).sort(), ["a", "b", "c"]);
 const lw = merge({ "sp:ui": { v: "new", t: 9 } }, { "sp:ui": { v: "old", t: 1 } });
 assert.equal(lw["sp:ui"].v, "new");
 
-console.log(`ok — 문제 ${n}개, 채점·동기화 규칙 통과`);
+for (const s of subjects) assert.ok(s.guide, `${s.id} 공부법 없음`);
+for (const s of subjects) for (const u of s.units) assert.ok(u.concept, `${s.id}/${u.id} 개념 없음`);
+console.log(`ok — 문제 ${n}개 · 모든 과목 공부법·단원 개념, 채점·동기화 규칙 통과`);

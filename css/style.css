@@ -336,3 +336,25 @@ body.embedded .container { padding: 0; }
 .acct-sec summary { cursor: pointer; font-weight: 700; }
 .acct-sec[open] { display: flex; flex-direction: column; gap: 8px; }
 .mbd .seg { margin: 0; }
+
+/* ── 공부법 · 개념 */
+.qtile.guide-tile { background: var(--greenbg); border-color: #8fd9b4; }
+.qtile.guide-tile b { color: var(--green); }
+.concept { font-size: 15.5px; line-height: 1.75; }
+.concept h3 { font-size: 17px; margin: 18px 0 6px; padding-left: 10px; border-left: 4px solid var(--blue); }
+.concept h3:first-child { margin-top: 2px; }
+.concept p { margin: 6px 0; }
+.concept ul, .concept ol { margin: 6px 0; padding-left: 22px; }
+.concept li { margin: 3px 0; }
+.steps-ol li { margin: 6px 0; }
+.formula { margin: 10px 0; padding: 10px 14px; border-radius: 10px; background: var(--bluebg); border: 1px solid #c9d9ff; overflow-x: auto; }
+.tip { margin: 10px 0; padding: 9px 12px; border-radius: 10px; background: var(--amberbg); border: 1px solid #f5d38a; font-size: 14.5px; }
+.tip.warn { background: var(--redbg); border-color: #f7b7b2; }
+.ctable { width: 100%; border-collapse: collapse; margin: 8px 0; font-size: 14px; display: block; overflow-x: auto; }
+.ctable th, .ctable td { border: 1px solid var(--rule); padding: 6px 8px; text-align: left; vertical-align: top; }
+.ctable th { background: var(--paper); white-space: nowrap; }
+.concept .code { font-size: 13.5px; }
+.cdet { background: #fff; border: 2px solid var(--rule); border-radius: 14px; padding: 10px 14px; margin-bottom: 8px; }
+.cdet summary { cursor: pointer; font-weight: 700; font-size: 15.5px; }
+.cdet[open] summary { margin-bottom: 8px; }
+.cdet .btn { margin-top: 8px; }
