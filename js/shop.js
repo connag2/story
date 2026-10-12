@@ -15,7 +15,7 @@
       if (v == null || v === false) continue;
       if (k === "class") e.className = v;
       else if (k === "text") e.textContent = v;
-      else if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
+      else if (k.startsWith("on") && typeof v === "function") e.addEventListener(k.slice(2), v);
       else e.setAttribute(k, v === true ? "" : v);
     }
     e.append(...kids.flat().filter((x) => x != null && x !== false));

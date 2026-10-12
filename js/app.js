@@ -24,6 +24,19 @@
         if (u) u.concept = html;
       });
     },
+    // 풀이 과정 (data/solutions-*.js)
+    //   { "단원id/묶음번호-문제번호": ["1단계 html", "2단계 html", ...] }   번호는 0부터
+    addSolutions(sid, map) {
+      const s = subjects.find((x) => x.id === sid);
+      if (!s) throw new Error(`과목 ${sid} 이 먼저 등록되어야 해요`);
+      const byId = new Map();
+      s.units.forEach((u) => u.groups.forEach((g) => g.items.forEach((it) => byId.set(it.id, it))));
+      Object.entries(map).forEach(([k, steps]) => {
+        const it = byId.get(`${sid}/${k}`);
+        if (!it) { (STORY._orphanSolutions = STORY._orphanSolutions || []).push(`${sid}/${k}`); return; }
+        it.steps = Array.isArray(steps) ? steps : [steps];
+      });
+    },
     // 다른 파일에서 과목에 단원을 덧붙일 때 (예: data/reading-mock-2026-09.js)
     addUnits(sid, units) {
       const s = subjects.find((x) => x.id === sid);
@@ -158,7 +171,7 @@
       if (v == null || v === false) continue;
       if (k === "class") el.className = v;
       else if (k === "html") el.innerHTML = v;
-      else if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
+      else if (k.startsWith("on") && typeof v === "function") el.addEventListener(k.slice(2), v);
       else el.setAttribute(k, v === true ? "" : v);
     }
     for (const kid of kids.flat()) {
@@ -334,7 +347,8 @@
       h("button", { class: "qtile exam-tile", onclick: () => scope.classList.toggle("hidden") }, h("b", {}, "시험범위"), h("span", {}, "2학년 2학기 1차 · 과목별 범위")),
       h("a", { class: "qtile" + (wrongCount() ? " warn" : ""), href: "#/wrong" }, h("b", {}, "오답노트"), h("span", {}, `${wrongCount()}문항`)),
       h("a", { class: "qtile board-tile", href: "#/board" }, h("b", {}, "💬 피드백 게시판"), h("span", {}, "의견 · 나만의 공부법 · 추가 요청")),
-      h("a", { class: "qtile shop-tile", href: "#/shop" }, h("b", {}, "😀 이모티콘 상점"), h("span", {}, "한 문제 맞히면 🪙1 · 모아서 사고팔기")));
+      h("a", { class: "qtile shop-tile", href: "#/shop" }, h("b", {}, "😀 이모티콘 상점"), h("span", {}, "한 문제 맞히면 🪙1 · 모아서 사고팔기")),
+      h("a", { class: "qtile note-tile", href: "#/note" }, h("b", {}, "📓 필기장"), h("span", {}, "펜 · 태블릿 · 마우스로 필기")));
     app.append(hero, scope);
 
     const guided = subjects.filter((x) => x.guide);
@@ -387,7 +401,9 @@
       h("a", { class: "qtile exam-tile", href: `#/test/${s.id}` },
         h("b", {}, "시험 보기"), h("span", {}, "단원 골라 실전처럼 · 시간 제한")),
       h("a", { class: "qtile" + (wrongCount(items) ? " warn" : ""), href: `#/wrong/${s.id}` },
-        h("b", {}, "오답노트"), h("span", {}, `${wrongCount(items)}문항`)));
+        h("b", {}, "오답노트"), h("span", {}, `${wrongCount(items)}문항`)),
+      h("a", { class: "qtile note-tile", href: `#/note/${s.id}` },
+        h("b", {}, "📓 필기장"), h("span", {}, "펜으로 정리 · 풀이 연습")));
     app.append(hero);
     if (s.exam) app.append(h("div", { class: "scope" }, h("div", { class: "scope-row" }, h("b", {}, "시험범위"), examBox(s))));
 
@@ -562,7 +578,8 @@
       card.append(h("div", { class: "group-head" },
         h("span", { class: "group-no" }, gi + 1),
         g.stars ? h("span", { class: "stars", title: "난이도" }, stars(g.stars)) : null,
-        g.src ? h("span", { class: "src" }, g.src) : null));
+        g.src ? h("span", { class: "src" }, g.src) : null,
+        inkTools(card, `ink:q:${it.id}`, { key: `ink:s:${it.id}`, title: `${u.title} ${gi + 1}번${it.label ? " " + it.label : ""}` })));
       if (g.q) card.append(h("div", { class: "group-q", html: g.q }));
       if (g.passage) card.append(h("button", { class: "btn ghost small passbtn", type: "button", onclick: () => openPassage(g) }, "📖 지문 보기"));
       const figs = images(s, g.img, g.imgLabels); if (figs) card.append(figs);
@@ -607,7 +624,8 @@
       h("span", { class: "group-no" }, no),
       g.stars ? h("span", { class: "stars", title: "난이도" }, stars(g.stars)) : null,
       g.src ? h("span", { class: "src" }, g.src) : null,
-      context ? h("span", { class: "src" }, context) : null));
+      context ? h("span", { class: "src" }, context) : null,
+      inkTools(card, `ink:g:${its[0].id.replace(/-\d+$/, "")}:${context ? "w" : "a"}`, { key: `ink:s:${its[0].id}`, title: `${no}번` })));
     if (g.q) card.append(h("div", { class: "group-q", html: g.q }));
     if (g.passage) card.append(h("details", { class: "pdet", open: !context }, h("summary", {}, "📖 지문"), h("div", { html: g.passage })));
     const figs = images(s, g.img, g.imgLabels);
@@ -618,6 +636,22 @@
     card.append(wrap);
     typeset(card);
     return card;
+  }
+
+  // ✏️ 필기 버튼들 (js/ink.js) — 카드 머리 오른쪽에 붙음
+  function inkTools(card, key, scratch) {
+    const S = window.STORY;
+    if (!S.inkButton) return null;
+    return h("span", { class: "ink-tools" }, S.inkButton(card, key),
+      scratch ? h("button", { class: "ink-toggle", type: "button", title: "넓은 연습장에 풀기", onclick: () => S.openScratch(scratch.key, scratch.title) }, "📓 연습장") : null);
+  }
+
+  // 풀이 과정: 틀렸을 때는 펼쳐서, 맞았을 때는 접어서 보여 줌
+  function stepsEl(it, open) {
+    if (!it.steps || !it.steps.length) return null;
+    return h("details", { class: "steps-sol", open: !!open },
+      h("summary", {}, "📝 풀이 과정"),
+      h("ol", {}, it.steps.map((t) => h("li", { html: t }))));
   }
 
   function itemCard(s, it, g, onChange) {
@@ -646,6 +680,8 @@
         h("div", { class: "answer" }, h("span", { class: "muted" }, "정답 "), h("span", { html: it.a })));
       const explain = it.explain || g.explain;
       if (explain) box.append(h("div", { class: "explain", html: "💡 " + explain }));
+      const sol = stepsEl(it, st === "x");
+      if (sol) box.append(sol);
       const row = h("div", { class: "row" });
       if (st === "x" && it.type === "input") {
         row.append(h("button", { class: "btn ghost small", onclick: () => mark("o") }, "내 답도 맞아요"));
@@ -724,6 +760,7 @@
       const reveal = h("div", { class: "reveal hidden" },
         h("div", { class: "answer" }, h("span", { class: "muted" }, "정답 "), h("span", { html: it.a })),
         (it.explain ? h("div", { class: "explain", html: "💡 " + it.explain }) : null),
+        stepsEl(it, true),
         h("div", { class: "row" },
           h("span", { class: "muted small" }, "스스로 채점"),
           h("button", { class: "btn ok", onclick: () => mark("o") }, "⭕ 맞았어요"),
@@ -812,6 +849,7 @@
         const pool = shuffle(refresh());
         if (!pool.length) { info.textContent = "고른 범위에 문제가 없어요."; return; }
         const qs = opts.count ? pool.slice(0, opts.count) : pool;
+        if (window.STORY.inkClear) window.STORY.inkClear("ink:t:");   // 지난 시험의 필기는 지움
         testRun = { sid, qs, ans: {}, start: Date.now(), limit: opts.limit * 60000, done: false };
         render();
       } }, "시작하기")));
@@ -859,7 +897,8 @@
     run.qs.forEach((q, k) => {
       const card = h("section", { class: "group" });
       card.append(h("div", { class: "group-head" }, h("span", { class: "group-no" }, k + 1),
-        q.g.stars ? h("span", { class: "stars" }, stars(q.g.stars)) : null, h("span", { class: "src" }, q.u.title)));
+        q.g.stars ? h("span", { class: "stars" }, stars(q.g.stars)) : null, h("span", { class: "src" }, q.u.title),
+        inkTools(card, `ink:t:${q.it.id}`, { key: `ink:t:s:${q.it.id}`, title: `시험 ${k + 1}번` })));
       if (q.g.q) card.append(h("div", { class: "group-q", html: q.g.q }));
       if (q.g.passage) card.append(h("button", { class: "btn ghost small passbtn", type: "button", onclick: () => openPassage(q.g) }, "📖 지문 보기"));
       const figs = images(s, q.g.img, q.g.imgLabels); if (figs) card.append(figs);
@@ -914,6 +953,7 @@
     const wrong = run.qs.filter((q) => !q.ok);
     app.append(h("div", { class: "row" },
       wrong.length ? h("button", { class: "btn", type: "button", onclick: () => {
+        if (window.STORY.inkClear) window.STORY.inkClear("ink:t:");   // 지난 시험의 필기는 지움
         testRun = { sid: run.sid, qs: shuffle(wrong.map((q) => ({ it: q.it, g: q.g, u: q.u, gi: q.gi }))), ans: {}, start: Date.now(), limit: run.limit, done: false };
         render();
       } }, "틀린 것만 다시 시험") : null,
@@ -934,6 +974,7 @@
           h("div", { class: "answer" }, h("span", { class: "muted" }, "내 답 "), h("span", { html: mine })),
           h("div", { class: "answer" }, h("span", { class: "muted" }, "정답 "), h("span", { html: q.it.a })),
           q.it.explain || q.g.explain ? h("div", { class: "explain", html: "💡 " + (q.it.explain || q.g.explain) }) : null,
+          stepsEl(q.it, true),
           q.it.type === "input" ? h("button", { class: "btn ghost small", type: "button", onclick: (e) => { setState(q.it.id, "o"); q.ok = true; e.target.closest(".group").remove(); } }, "내 답도 맞아요") : null));
       typeset(card);
       app.append(card);
@@ -952,8 +993,8 @@
     const parts = route.split("/").filter(Boolean).map(decodeURIComponent);
     const y = route === lastRoute ? window.scrollY : 0;
     app.replaceChildren();
-    document.body.classList.remove("embedded");
-    renderTop(["s", "wrong", "test", "guide"].includes(parts[0]) ? parts[1] : null);
+    document.body.classList.remove("embedded", "wide-note");
+    renderTop(["s", "wrong", "test", "guide", "note"].includes(parts[0]) ? parts[1] : null);
     if (parts[0] === "s" && parts[2]) viewUnit(app, parts[1], parts[2], parts[3]);
     else if (parts[0] === "s" && parts[1]) viewSubject(app, parts[1]);
     else if (parts[0] === "wrong") viewWrong(app, parts[1]);
@@ -961,6 +1002,7 @@
     else if (parts[0] === "guide" && parts[1]) viewGuide(app, parts[1]);
     else if (parts[0] === "board" && window.STORY.viewBoard) window.STORY.viewBoard(app);
     else if (parts[0] === "shop" && window.STORY.viewShop) window.STORY.viewShop(app, parts[1]);
+    else if (parts[0] === "note" && window.STORY.viewNotes) window.STORY.viewNotes(app, parts[1]);
     else viewHome(app);
     window.scrollTo(0, y);
     lastRoute = route;

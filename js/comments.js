@@ -28,7 +28,7 @@
       if (v == null || v === false) continue;
       if (k === "class") e.className = v;
       else if (k === "text") e.textContent = v;
-      else if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
+      else if (k.startsWith("on") && typeof v === "function") e.addEventListener(k.slice(2), v);
       else e.setAttribute(k, v === true ? "" : v);
     }
     e.append(...kids.flat().filter((x) => x != null && x !== false));
@@ -173,6 +173,32 @@
       el("div", { class: "row" }, btn, picker ? picker.button : null, parent ? null : who), msg);
   }
 
+  // ── 새 글 알림: 목록이 화면에 있는 동안 25초마다 확인 → "새 댓글 N개 · 새로고침" 버튼
+  //   shown() = 지금 보이는 글 id 들, reload() = 다시 불러오기
+  function watchNew(anchor, key, shown, reload) {
+    const btn = el("button", { class: "btn small cm-new hidden", type: "button" });
+    btn.addEventListener("click", () => { btn.classList.add("hidden"); reload(); });
+    let timer = 0;
+    const check = async () => {
+      if (!document.body.contains(anchor)) { clearInterval(timer); document.removeEventListener("visibilitychange", onVis); return; }
+      if (document.visibilityState !== "visible") return;
+      try {
+        const have = shown();
+        const r = await get(key);
+        const fresh = r.items.filter((it) => !have.has(it.id) && !it.mine && !it.deleted);
+        if (fresh.length) {
+          btn.textContent = `🔔 새 댓글 ${fresh.length}개 · 새로고침`;
+          btn.classList.remove("hidden");
+        }
+      } catch (e) { /* 다음에 다시 */ }
+    };
+    const onVis = () => { if (document.visibilityState === "visible") check(); };
+    timer = setInterval(check, 25000);
+    document.addEventListener("visibilitychange", onVis);
+    btn.hide = () => btn.classList.add("hidden");
+    return btn;
+  }
+
   // ── 공부법·개념 아래 댓글 칸
   S.commentBox = function (key, label) {
     const listEl = el("div", { class: "cm-list" });
@@ -181,9 +207,12 @@
       el("div", { class: "cm-title" }, el("b", {}, "💬 ", label || "의견 · 나만의 공부법"), count,
         el("a", { class: "link", href: "#/board" }, "전체 게시판 →")),
       el("p", { class: "muted small", text: "이 페이지에 대한 의견, 나만의 공부법, 추가했으면 하는 내용을 남겨 주세요. 모두 함께 봐요." }));
+    let ids = new Set(), fresh = null;
     async function load() {
       try {
         const r = await get(key);
+        ids = new Set(r.items.map((x) => x.id));
+        if (fresh) fresh.hide();
         const th = threads(r.items);
         count.textContent = `${th.length}개`;
         const ctx = { admin: r.admin, key, reload: load };
@@ -199,7 +228,8 @@
       S.serverReady().then((ok) => {
         if (!ok) return;
         box.classList.remove("hidden");
-        box.append(composer(key, load), listEl);
+        fresh = watchNew(listEl, key, () => ids, load);
+        box.append(composer(key, load), fresh, listEl);
         load();
       });
     }
@@ -234,7 +264,7 @@
     }
     async function load() {
       try {
-        const r = await get(""); all = r.items; admin = r.admin; paint();
+        const r = await get(""); all = r.items; admin = r.admin; fresh.hide(); paint();
         if (admin && !adminBox.firstChild) adminPanel();
       } catch (e) { listEl.replaceChildren(el("p", { class: "muted", text: e.message })); }
     }
@@ -265,7 +295,8 @@
     app.append(adminBox);
     app.append(el("div", { class: "row" }, info, copyBtn,
       blocked().length ? el("span", { class: "muted small" }, `🚫 차단 ${blocked().length}명`) : null));
-    app.append(listEl);
+    const fresh = watchNew(listEl, "", () => new Set(all.map((x) => x.id)), load);
+    app.append(fresh, listEl);
     load();
   };
 })();

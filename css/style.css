@@ -418,3 +418,47 @@ body.embedded .container { padding: 0; }
 .link[disabled] { opacity: .5; cursor: default; }
 .toast { position: fixed; left: 50%; bottom: 90px; transform: translateX(-50%); z-index: 60; background: var(--ink); color: #fff; padding: 10px 16px; border-radius: 12px; font-weight: 700; box-shadow: 0 8px 24px rgba(0,0,0,.2); transition: opacity .4s; }
 .toast.out { opacity: 0; }
+
+/* ── 풀이 과정 */
+.steps-sol { margin-top: 8px; background: #fff; border: 1.5px solid var(--rule); border-radius: 12px; padding: 8px 12px; }
+.steps-sol summary { cursor: pointer; font-weight: 800; color: var(--blue); }
+.steps-sol ol { margin: 8px 0 2px; padding-left: 22px; display: flex; flex-direction: column; gap: 6px; }
+.steps-sol li::marker { color: var(--blue); font-weight: 800; }
+
+/* ── 새 댓글 알림 */
+.cm-new { position: sticky; top: 120px; z-index: 6; display: block; margin: 6px auto; box-shadow: 0 6px 18px rgba(47, 107, 255, .25); }
+
+/* ── ✏️ 필기 */
+.ink-host { position: relative; }
+.ink-cv { position: absolute; left: 0; top: 0; z-index: 3; pointer-events: none; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.ink-cv.on { pointer-events: auto; cursor: crosshair; }
+.inking { outline: 2px dashed var(--blue); outline-offset: 3px; }
+.ink-tools { margin-left: auto; display: inline-flex; gap: 6px; position: relative; z-index: 4; }
+.ink-toggle { border: 1px solid var(--rule); background: #fff; border-radius: 999px; padding: 3px 10px; font-size: 13px; font-weight: 700; cursor: pointer; }
+.ink-toggle.on { background: var(--blue); border-color: var(--blue); color: #fff; }
+.ink-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; background: #fff; border: 1.5px solid var(--rule); border-radius: 14px; padding: 6px 8px; }
+.ink-bar.floating { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(76px + env(safe-area-inset-bottom)); z-index: 30; flex-wrap: nowrap; overflow-x: auto; max-width: calc(100vw - 16px); box-shadow: 0 10px 30px rgba(15, 30, 60, .18); }
+.ink-bar.sticky { position: sticky; z-index: 9; margin-bottom: 8px; }
+.ink-grp { display: flex; gap: 3px; padding-right: 6px; border-right: 1px solid var(--rule); }
+.ink-b, .ink-c, .ink-s { flex: none; width: 36px; height: 36px; border-radius: 10px; border: 1.5px solid transparent; background: none; cursor: pointer; display: grid; place-items: center; font-size: 17px; padding: 0; }
+.ink-b.wide { width: auto; padding: 0 10px; font-size: 13px; font-weight: 700; white-space: nowrap; border-color: var(--rule); }
+.ink-b:disabled { opacity: .35; cursor: default; }
+.ink-b.on, .ink-s.on { background: var(--bluebg); border-color: var(--blue); }
+.ink-b.close { font-size: 15px; color: var(--ink2); }
+.ink-c::after { content: ""; width: 20px; height: 20px; border-radius: 50%; background: var(--c); }
+.ink-c.on { border-color: var(--c); }
+.ink-s i { display: block; border-radius: 50%; background: var(--ink); }
+.ink-page { position: relative; background-color: #fff; border: 1.5px solid var(--rule); border-radius: 12px; overflow: hidden; --k: 1; }
+.ink-page.bg-lines { background-image: linear-gradient(to bottom, transparent calc(100% - 1px), #d6e2f3 0); background-size: 100% calc(36px * var(--k)); }
+.ink-page.bg-grid { background-image: linear-gradient(to bottom, transparent calc(100% - 1px), #dfe8f6 0), linear-gradient(to right, transparent calc(100% - 1px), #dfe8f6 0); background-size: calc(24px * var(--k)) calc(24px * var(--k)); }
+.ink-sheet { width: min(920px, 100%); height: calc(100dvh - 32px); }
+.ink-sheet > .ink-bar { margin: 0 12px 8px; }
+.ink-sheet-body { overflow-y: auto; flex: 1; padding-top: 0; }
+body.wide-note .container { max-width: 1100px; }
+.nb-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+.nb-tools { flex-wrap: wrap; margin-bottom: 8px; }
+.nb-tools select { font: inherit; padding: 6px 8px; border-radius: 10px; border: 1px solid var(--rule); background: #fff; }
+.qtile.note-tile { background: #fff7ed; border-color: #fdba74; }
+.qtile.note-tile b { color: #c2410c; }
+@media print { .ink-bar, .ink-tools { display: none !important; } }
+@media (max-width: 640px) { .ink-bar.floating { flex-wrap: wrap; justify-content: center; width: calc(100vw - 16px); bottom: calc(72px + env(safe-area-inset-bottom)); } .ink-b, .ink-c, .ink-s { width: 32px; height: 32px; } .ink-grp { padding-right: 3px; } }
