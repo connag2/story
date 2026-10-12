@@ -239,6 +239,7 @@
           h("div", { class: "htt" }, s ? s.name : "📚 스토리 공부방"),
           h("div", { class: "hts" }, s && s.embed ? s.desc : `${s ? s.units.length + "단원 · " : ""}${st.done}/${st.total} 문항 풂`)),
         h("div", { class: "topbtns" },
+          (() => { const p = window.STORY.points && window.STORY.points(); return p ? h("a", { class: "ib ghost pts", href: "#/shop", title: "포인트 · 이모티콘 상점" }, `🪙 ${p.points}`) : null; })(),
           h("button", { class: "ib ghost", id: "acct", type: "button", onclick: () => window.STORY.openAccount && window.STORY.openAccount() },
             (window.STORY.accountLabel && window.STORY.accountLabel()) || "로그인"),
           h("a", { class: "ib", id: "nav-wrong", href: s ? `#/wrong/${s.id}` : "#/wrong" }, "오답"))),
@@ -332,7 +333,8 @@
     hero.append(
       h("button", { class: "qtile exam-tile", onclick: () => scope.classList.toggle("hidden") }, h("b", {}, "시험범위"), h("span", {}, "2학년 2학기 1차 · 과목별 범위")),
       h("a", { class: "qtile" + (wrongCount() ? " warn" : ""), href: "#/wrong" }, h("b", {}, "오답노트"), h("span", {}, `${wrongCount()}문항`)),
-      h("a", { class: "qtile board-tile", href: "#/board" }, h("b", {}, "💬 피드백 게시판"), h("span", {}, "의견 · 나만의 공부법 · 추가 요청")));
+      h("a", { class: "qtile board-tile", href: "#/board" }, h("b", {}, "💬 피드백 게시판"), h("span", {}, "의견 · 나만의 공부법 · 추가 요청")),
+      h("a", { class: "qtile shop-tile", href: "#/shop" }, h("b", {}, "😀 이모티콘 상점"), h("span", {}, "한 문제 맞히면 🪙1 · 모아서 사고팔기")));
     app.append(hero, scope);
 
     const guided = subjects.filter((x) => x.guide);
@@ -958,13 +960,18 @@
     else if (parts[0] === "test" && parts[1]) viewTest(app, parts[1]);
     else if (parts[0] === "guide" && parts[1]) viewGuide(app, parts[1]);
     else if (parts[0] === "board" && window.STORY.viewBoard) window.STORY.viewBoard(app);
+    else if (parts[0] === "shop" && window.STORY.viewShop) window.STORY.viewShop(app, parts[1]);
     else viewHome(app);
     window.scrollTo(0, y);
     lastRoute = route;
   }
 
   window.addEventListener("hashchange", render);
-  document.addEventListener("DOMContentLoaded", render);
+  document.addEventListener("DOMContentLoaded", () => {
+    render();
+    // 포인트가 바뀌면 위쪽 🪙 와 상점 화면을 새로 그림
+    if (window.STORY.onPoints) window.STORY.onPoints(() => { renderTop(currentSid); if (/^#\/shop/.test(location.hash)) render(); });
+  });
 
   // 다른 스크립트(js/sync.js 등)와 주고받는 통로
   Object.assign(window.STORY, {
