@@ -40,7 +40,7 @@
       throw new Error("로그인은 Vercel에 배포한 주소에서만 쓸 수 있어요. 지금은 '백업 파일'로 옮겨 주세요.");
     }
     const data = await r.json().catch(() => ({}));
-    if (r.status === 401 && auth) { logout(); }
+    if (r.status === 401 && data.code === "auth" && auth) { logout(); }  // 다른 기기에서 비밀번호를 바꾸는 등 토큰이 무효
     if (!r.ok) throw new Error(data.error || `오류 (${r.status})`);
     return data;
   }
@@ -184,49 +184,208 @@
     return { wrap, close };
   }
 
+  // ── 로그인 창 · 계정 창
+  const inp = (ph, type = "text", ac = "off", extra = {}) =>
+    el("input", { class: "answer-input", placeholder: ph, type, autocomplete: ac, ...extra });
+  const msgEl = () => el("div", { class: "msg", role: "status" });
+  const say = (m, text, kind = "") => { m.textContent = text; m.className = "msg" + (kind ? " " + kind : ""); };
+  const authCall = (body) => api("auth", { method: "POST", body: JSON.stringify(body) });
+  function signedIn(r) {
+    auth = { token: r.token, name: r.name || (auth && auth.name) };
+    LS.set(AUTH, JSON.stringify(auth));
+  }
+  // 버튼을 누르는 동안 두 번 누르지 않게
+  function busyBtn(btn, fn) {
+    return async () => {
+      if (btn.disabled) return;
+      btn.disabled = true;
+      try { await fn(); } finally { btn.disabled = false; }
+    };
+  }
+
   S.openAccount = function () {
     if (auth) return openAccountMenu();
-    const name = el("input", { class: "answer-input", placeholder: "이름 (2~20자)", autocomplete: "username", maxlength: "20" });
-    const pw = el("input", { class: "answer-input", type: "password", placeholder: "비밀번호 (4자 이상)", autocomplete: "current-password" });
-    const msg = el("div", { class: "msg" });
-    const go = async (action) => {
-      msg.textContent = "잠시만요…"; msg.className = "msg";
-      try {
-        const r = await api("auth", { method: "POST", body: JSON.stringify({ action, name: name.value, password: pw.value }) });
-        auth = { token: r.token, name: r.name };
-        LS.set(AUTH, JSON.stringify(auth));
-        m.close();
-        await sync();
-        paint();
-      } catch (e) { msg.textContent = e.message; msg.className = "msg err"; }
-    };
-    pw.addEventListener("keydown", (e) => { if (e.key === "Enter") go("login"); });
-    const m = modal("로그인",
-      el("p", { class: "muted" }, "로그인하면 휴대폰·태블릿·컴퓨터에서 푼 기록(영어 공부장 포함)이 자동으로 맞춰져요."),
-      el("div", { class: "form" }, name, pw),
-      msg,
-      el("div", { class: "row" },
-        el("button", { class: "btn", type: "button", onclick: () => go("login") }, "로그인"),
-        el("button", { class: "btn ghost", type: "button", onclick: () => go("signup") }, "회원가입")),
-      el("p", { class: "muted small" }, "비밀번호는 암호화해서 저장돼요. 잊어버리면 찾을 수 없으니 꼭 기억해 두세요."),
-      el("hr"),
-      backupSection());
-    name.focus();
+    const m = modal("로그인");
+    const body = m.wrap.querySelector(".mbd");
+    const show = (view) => { body.replaceChildren(...view()); const f = body.querySelector("input"); if (f) f.focus(); };
+
+    const tabs = (cur) => el("div", { class: "seg" },
+      el("button", { class: "chip" + (cur === "login" ? " on" : ""), type: "button", onclick: () => show(loginView) }, "로그인"),
+      el("button", { class: "chip" + (cur === "signup" ? " on" : ""), type: "button", onclick: () => show(signupView) }, "회원가입"));
+
+    function loginView() {
+      const name = inp("이름", "text", "username", { maxlength: "20" });
+      const pw = inp("비밀번호", "password", "current-password");
+      const msg = msgEl();
+      const btn = el("button", { class: "btn", type: "button" }, "로그인");
+      const go = busyBtn(btn, async () => {
+        say(msg, "잠시만요…");
+        try {
+          signedIn(await authCall({ action: "login", name: name.value, password: pw.value }));
+          m.close(); await sync(); paint();
+        } catch (e) { say(msg, e.message, "err"); }
+      });
+      btn.addEventListener("click", go);
+      pw.addEventListener("keydown", (e) => { if (e.key === "Enter") go(); });
+      return [tabs("login"),
+        el("p", { class: "muted" }, "로그인하면 휴대폰·태블릿·컴퓨터에서 푼 기록(영어 공부장 포함)이 자동으로 맞춰져요."),
+        el("form", { class: "form", onsubmit: (e) => { e.preventDefault(); go(); } }, name, pw),
+        msg,
+        el("div", { class: "row" }, btn,
+          el("button", { class: "link", type: "button", onclick: () => show(resetView) }, "비밀번호를 잊었어요")),
+        el("hr"), backupSection()];
+    }
+
+    function signupView() {
+      const name = inp("이름 (2~20자, 한글·영문·숫자)", "text", "username", { maxlength: "20" });
+      const pw = inp("비밀번호 (4자 이상)", "password", "new-password");
+      const pw2 = inp("비밀번호 한 번 더", "password", "new-password");
+      const msg = msgEl();
+      const btn = el("button", { class: "btn", type: "button" }, "가입하기");
+      const go = busyBtn(btn, async () => {
+        if (pw.value !== pw2.value) return say(msg, "두 비밀번호가 달라요.", "err");
+        say(msg, "잠시만요…");
+        try {
+          const r = await authCall({ action: "signup", name: name.value, password: pw.value });
+          signedIn(r);
+          await sync(); paint();
+          show(() => recoveryView(r.recovery, "가입 완료!"));
+        } catch (e) { say(msg, e.message, "err"); }
+      });
+      btn.addEventListener("click", go);
+      pw2.addEventListener("keydown", (e) => { if (e.key === "Enter") go(); });
+      return [tabs("signup"),
+        el("p", { class: "muted" }, "이름은 다른 사람과 겹치지 않게 정해 주세요. 지금 이 기기에서 푼 기록도 계정에 그대로 올라가요."),
+        el("form", { class: "form", onsubmit: (e) => { e.preventDefault(); go(); } }, name, pw, pw2),
+        msg, el("div", { class: "row" }, btn)];
+    }
+
+    function resetView() {
+      const name = inp("이름", "text", "username", { maxlength: "20" });
+      const code = inp("복구 코드 (예: ABCD-EFGH-JKLM)", "text", "off", { autocapitalize: "characters", spellcheck: "false" });
+      const pw = inp("새 비밀번호 (4자 이상)", "password", "new-password");
+      const pw2 = inp("새 비밀번호 한 번 더", "password", "new-password");
+      const msg = msgEl();
+      const btn = el("button", { class: "btn", type: "button" }, "비밀번호 다시 정하기");
+      btn.addEventListener("click", busyBtn(btn, async () => {
+        if (pw.value !== pw2.value) return say(msg, "두 비밀번호가 달라요.", "err");
+        say(msg, "잠시만요…");
+        try {
+          const r = await authCall({ action: "reset", name: name.value, recovery: code.value, newPassword: pw.value });
+          signedIn(r);
+          await sync(); paint();
+          show(() => recoveryView(r.recovery, "비밀번호를 바꿨어요"));
+        } catch (e) { say(msg, e.message, "err"); }
+      }));
+      return [
+        el("p", { class: "muted" }, "가입할 때 받은 복구 코드로 비밀번호를 다시 정해요. 다른 기기는 로그아웃돼요."),
+        el("form", { class: "form", onsubmit: (e) => e.preventDefault() }, name, code, pw, pw2),
+        msg,
+        el("div", { class: "row" }, btn, el("button", { class: "link", type: "button", onclick: () => show(loginView) }, "← 로그인으로")),
+        el("p", { class: "muted small" }, "복구 코드도 잃어버렸다면 계정을 되찾을 방법이 없어요. 새 이름으로 가입한 뒤, 이 기기의 기록은 그대로 올라가요.")];
+    }
+
+    function recoveryView(code, title) {
+      const ok = el("input", { type: "checkbox" });
+      const done = el("button", { class: "btn", type: "button", disabled: "" , onclick: () => m.close() }, "시작하기");
+      ok.addEventListener("change", () => { done.disabled = !ok.checked; });
+      const copyMsg = msgEl();
+      return [
+        el("b", { class: "big-ok" }, `✅ ${title}`),
+        el("p", {}, "아래 ", el("b", {}, "복구 코드"), "는 비밀번호를 잊었을 때 필요해요. ", el("b", {}, "지금 한 번만"), " 보여 주니 꼭 적어 두거나 저장해 두세요."),
+        el("div", { class: "rcode" }, code),
+        el("div", { class: "row" },
+          el("button", { class: "btn ghost", type: "button", onclick: async () => {
+            try { await navigator.clipboard.writeText(code); say(copyMsg, "복사했어요.", "ok"); } catch (e) { say(copyMsg, "복사가 안 돼요. 직접 적어 주세요.", "err"); }
+          } }, "복사"),
+          el("button", { class: "btn ghost", type: "button", onclick: () => saveText(`스토리공부방-복구코드-${auth ? auth.name : ""}.txt`,
+            `스토리 공부방 복구 코드\n이름: ${auth ? auth.name : ""}\n복구 코드: ${code}\n\n비밀번호를 잊었을 때 로그인 창의 '비밀번호를 잊었어요'에서 써요.\n`) }, "파일로 저장")),
+        copyMsg,
+        el("label", { class: "toggle" }, ok, " 안전한 곳에 적어 뒀어요"),
+        el("div", { class: "row" }, done)];
+    }
+
+    show(loginView);
   };
 
+  function saveText(filename, text) {
+    const a = el("a", { href: URL.createObjectURL(new Blob([text], { type: "text/plain;charset=utf-8" })), download: filename });
+    document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+
   function openAccountMenu() {
-    modal(`${auth.name} 님`,
-      el("div", { class: "row" },
-        el("span", { id: "acct-status", class: "muted" }),
-      ),
+    const m = modal(`${auth.name} 님`);
+    const body = m.wrap.querySelector(".mbd");
+    const created = el("span", { class: "muted small" });
+    authCall({ action: "me" }).then((r) => {
+      if (r.created) created.textContent = `가입일 ${new Date(r.created).toLocaleDateString("ko-KR")}`;
+    }).catch(() => {});
+
+    // 접었다 펴는 칸 하나: 제목, 설명, 입력칸들, 실행
+    function section(title, desc, fields, label, run, danger) {
+      const msg = msgEl();
+      const btn = el("button", { class: "btn" + (danger ? " no" : ""), type: "button" }, label);
+      btn.addEventListener("click", busyBtn(btn, async () => {
+        say(msg, "잠시만요…");
+        try { await run(msg); } catch (e) { say(msg, e.message, "err"); }
+      }));
+      return el("details", { class: "acct-sec" },
+        el("summary", {}, title),
+        el("p", { class: "muted small" }, desc),
+        fields.length ? el("form", { class: "form", onsubmit: (e) => e.preventDefault() }, ...fields) : null,
+        msg, el("div", { class: "row" }, btn));
+    }
+
+    const cur = inp("지금 비밀번호", "password", "current-password");
+    const nw = inp("새 비밀번호 (4자 이상)", "password", "new-password");
+    const nw2 = inp("새 비밀번호 한 번 더", "password", "new-password");
+    const rpw = inp("비밀번호", "password", "current-password");
+    const dpw = inp("비밀번호", "password", "current-password");
+    const dname = inp(`확인을 위해 이름(${auth.name})을 그대로 입력`);
+
+    body.replaceChildren(
+      el("div", { class: "row" }, el("span", { id: "acct-status", class: "muted" }), created),
       el("div", { class: "row" },
         el("button", { class: "btn", type: "button", onclick: () => sync() }, "지금 동기화"),
-        el("button", { class: "btn ghost", type: "button", onclick: () => { logout(); document.querySelector(".modal")?.remove(); } }, "로그아웃")),
+        el("button", { class: "btn ghost", type: "button", onclick: () => { logout(); m.close(); } }, "로그아웃")),
       el("p", { class: "muted small" }, "로그아웃해도 이 기기의 기록은 지워지지 않아요."),
+      el("hr"),
+      section("🔑 비밀번호 바꾸기", "바꾸면 다른 기기는 로그아웃돼요. 이 기기는 그대로예요.", [cur, nw, nw2], "바꾸기", async (msg) => {
+        if (nw.value !== nw2.value) return say(msg, "두 새 비밀번호가 달라요.", "err");
+        signedIn(await authCall({ action: "change", password: cur.value, newPassword: nw.value }));
+        cur.value = nw.value = nw2.value = "";
+        say(msg, "비밀번호를 바꿨어요.", "ok");
+      }),
+      section("🧾 복구 코드 새로 받기", "예전 복구 코드는 더 이상 쓸 수 없게 돼요.", [rpw], "새 코드 받기", async (msg) => {
+        const r = await authCall({ action: "recovery", password: rpw.value });
+        rpw.value = "";
+        say(msg, "");
+        msg.replaceChildren(el("div", { class: "rcode" }, r.recovery),
+          el("button", { class: "btn ghost small", type: "button", onclick: () => saveText(`스토리공부방-복구코드-${auth.name}.txt`,
+            `스토리 공부방 복구 코드\n이름: ${auth.name}\n복구 코드: ${r.recovery}\n`) }, "파일로 저장"));
+      }),
+      section("📱 다른 기기 모두 로그아웃", "잃어버린 휴대폰이나 학교 컴퓨터에 로그인돼 있다면 써요.", [], "모두 로그아웃", async (msg) => {
+        signedIn(await authCall({ action: "logoutAll" }));
+        say(msg, "다른 기기를 모두 로그아웃했어요.", "ok");
+      }),
+      section("🗑 계정 삭제", "계정과 서버에 저장된 기록이 모두 지워지고 되돌릴 수 없어요. 이 기기에 있는 기록은 남아요.", [dpw, dname], "계정 삭제", async (msg) => {
+        if (dname.value.trim() !== auth.name) return say(msg, "이름이 정확히 맞아야 지워져요.", "err");
+        await authCall({ action: "delete", password: dpw.value });
+        logout();
+        say(msg, "계정을 지웠어요.", "ok");
+        setTimeout(() => m.close(), 1200);
+      }, true),
       el("hr"),
       backupSection());
     paint();
   }
+
+  // 서버(로그인 기능)가 있는 주소인지 한 번만 확인 — 정적 호스팅이면 홈의 로그인 안내를 숨김
+  let probe = null;
+  S.serverReady = () => probe || (probe = fetch("/api/auth", { method: "GET" })
+    .then((r) => r.status !== 404).catch(() => false));
+  S.isLoggedIn = () => !!auth;
 
   // ── 백업 파일 (로그인 없이 기기 옮기기)
   function backupSection() {

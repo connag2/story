@@ -287,7 +287,24 @@
       h("div", { class: "tcell" }, h("b", {}, `${streak}일`), h("span", {}, "연속 공부")));
   }
 
+  // 로그인 안 했을 때 홈에 한 번 보여 주는 안내 (서버가 있는 주소에서만, 닫으면 다시 안 뜸)
+  const NUDGE = "story-nudge-off";
+  function loginNudge() {
+    const S = window.STORY;
+    if (!S.isLoggedIn || S.isLoggedIn() || localStorage.getItem(NUDGE)) return null;
+    const box = h("div", { class: "nudge hidden" },
+      h("div", {}, h("b", {}, "🔒 로그인하면 기록이 안전하게 저장돼요"),
+        h("span", {}, "휴대폰·컴퓨터 어디서든 이어서 풀 수 있고, 영어 공부장 기록도 같이 맞춰져요.")),
+      h("div", { class: "row" },
+        h("button", { class: "btn", type: "button", onclick: () => S.openAccount() }, "로그인 · 가입"),
+        h("button", { class: "link", type: "button", onclick: () => { try { localStorage.setItem(NUDGE, "1"); } catch (e) { /* 무시 */ } box.remove(); } }, "괜찮아요")));
+    if (S.serverReady) S.serverReady().then((ok) => { if (ok) box.classList.remove("hidden"); });
+    return box;
+  }
+
   function viewHome(app) {
+    const nudge = loginNudge();
+    if (nudge) app.append(nudge);
     app.append(todayCard());
     const last = getLast();
     const lu = last && findUnit(last[0], last[1]);
