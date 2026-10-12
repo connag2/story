@@ -331,7 +331,8 @@
       h("a", { class: "scope-row", href: subjectHref(s) }, h("b", {}, s.name), examBox(s))));
     hero.append(
       h("button", { class: "qtile exam-tile", onclick: () => scope.classList.toggle("hidden") }, h("b", {}, "시험범위"), h("span", {}, "2학년 2학기 1차 · 과목별 범위")),
-      h("a", { class: "qtile" + (wrongCount() ? " warn" : ""), href: "#/wrong" }, h("b", {}, "오답노트"), h("span", {}, `${wrongCount()}문항`)));
+      h("a", { class: "qtile" + (wrongCount() ? " warn" : ""), href: "#/wrong" }, h("b", {}, "오답노트"), h("span", {}, `${wrongCount()}문항`)),
+      h("a", { class: "qtile board-tile", href: "#/board" }, h("b", {}, "💬 피드백 게시판"), h("span", {}, "의견 · 나만의 공부법 · 추가 요청")));
     app.append(hero, scope);
 
     const guided = subjects.filter((x) => x.guide);
@@ -478,6 +479,7 @@
     const card = h("section", { class: "group concept", html: u.concept });
     typeset(card);
     app.append(card);
+    if (window.STORY.commentBox) app.append(window.STORY.commentBox(`unit:${s.id}/${u.id}`, "이 단원 의견 · 나만의 공부법"));
     app.append(h("div", { class: "bottombar" },
       h("a", { class: "btn ghost", href: `#/guide/${s.id}` }, "📘 과목 공부법"),
       h("a", { class: "btn big", href: `${base}/${hasPassage ? "read" : "one"}` }, hasPassage ? "개념 다 봤어요 · 지문 읽기 →" : "개념 다 봤어요 · 문제 풀기 →")));
@@ -505,6 +507,7 @@
       });
     }
     if (s.embed) app.append(h("div", { class: "pager" }, h("span"), h("a", { class: "btn", href: `#/s/${s.id}` }, `${s.name} 공부 시작 →`)));
+    if (window.STORY.commentBox) app.append(window.STORY.commentBox(`guide:${s.id}`, `${s.name} 공부법 의견 · 나만의 공부법`));
   }
 
   // ── 지문 읽기: 지문만 쭉 읽고 문제로
@@ -954,6 +957,7 @@
     else if (parts[0] === "wrong") viewWrong(app, parts[1]);
     else if (parts[0] === "test" && parts[1]) viewTest(app, parts[1]);
     else if (parts[0] === "guide" && parts[1]) viewGuide(app, parts[1]);
+    else if (parts[0] === "board" && window.STORY.viewBoard) window.STORY.viewBoard(app);
     else viewHome(app);
     window.scrollTo(0, y);
     lastRoute = route;
