@@ -1,8 +1,9 @@
 // 학습 기록 동기화
 //   GET /api/sync  → { keys: { 키: { v: 값|null, t: 시각 } }, t }
-//   PUT /api/sync  { keys } → { ok, t }
+//   PUT /api/sync  { keys } → { ok, t, points }   (처음 맞힌 문제만큼 포인트 적립)
 // 병합은 브라우저(js/sync.js)가 하고, 서버는 로그인한 사람의 최신 묶음을 보관만 해요.
 import { HttpError, authUser, body, handle, json, readJson, writeJson } from "./_lib.js";
+import { earnFromProgress } from "./_points.js";
 
 export function GET(req) {
   return handle(async () => {
@@ -24,6 +25,8 @@ export function PUT(req) {
     }
     const t = Date.now();
     await writeJson(`data/${u}.json`, { keys, t });
-    return json({ ok: true, t });
+    // 처음 맞힌 문제마다 1포인트
+    const pts = keys["story-progress-v1"] ? await earnFromProgress(u, keys["story-progress-v1"].v) : null;
+    return json({ ok: true, t, points: pts });
   });
 }

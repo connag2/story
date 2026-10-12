@@ -1,7 +1,9 @@
 /* 댓글 · 피드백 게시판
  *   STORY.commentBox(key, label)  → 공부법·개념 아래에 붙는 댓글 칸
  *   STORY.viewBoard(app)          → #/board 전체 게시판 (위치·종류·상태로 걸러 보기, 요청 복사)
- * 글 내용은 항상 textContent 로만 넣어요(HTML로 해석하지 않음).
+ * 답글(한 단계) · 👍 · 🚨 신고 · 🚫 차단(내 화면에서 숨김, 기기 간 동기화) · 😀 이모티콘
+ * 관리자: 상태 달기 · 가리기/풀기 · 글쓰기 정지
+ * 글 내용은 항상 글자(textContent)로만 넣어요(HTML로 해석하지 않음).
  */
 (function () {
   "use strict";
@@ -13,6 +15,12 @@
     bug: { label: "🐞 오류 신고", hint: "정답이 틀렸어요, 화면이 이상해요 (몇 번 문제인지 함께)" },
   };
   const STATUS = { "": "", checking: "확인 중", planned: "반영 예정", done: "반영 완료" };
+
+  // ── 차단 목록 (이름) — story-* 키라서 로그인하면 기기 간 동기화
+  const BLOCK = "story-blocked-v1";
+  const blocked = () => { try { return JSON.parse(localStorage.getItem(BLOCK)) || []; } catch (e) { return []; } };
+  const setBlocked = (a) => { try { localStorage.setItem(BLOCK, JSON.stringify(a)); } catch (e) { /* 무시 */ } };
+  S.blocked = blocked;
 
   function el(tag, attrs = {}, ...kids) {
     const e = document.createElement(tag);
@@ -36,6 +44,7 @@
   };
   const get = (key) => S.api("comments" + (key ? "?key=" + encodeURIComponent(key) : ""));
   const post = (b) => S.api("comments", { method: "POST", body: JSON.stringify(b) });
+  const rich = (text) => (S.renderRich ? S.renderRich(text) : document.createTextNode(text));
 
   // 위치 키 → 사람이 읽을 이름과 링크
   function place(key) {
@@ -50,46 +59,89 @@
     return { name: "공부방 전체", href: "#/board" };
   }
 
-  // ── 글 하나
-  function itemEl(it, admin, onChange, showPlace) {
+  // ── 글 하나 (+ 답글들)
+  //   ctx = { admin, key, reload, showPlace, replies: [..] }
+  function itemEl(it, ctx) {
     const kind = KINDS[it.kind] || KINDS.opinion;
-    const like = el("button", { class: "chip like" + (it.liked ? " on" : ""), type: "button", title: "도움돼요" }, `👍 ${it.likes}`);
-    like.addEventListener("click", async () => {
-      if (!S.isLoggedIn()) return S.openAccount();
-      try { const r = await post({ action: "like", id: it.id }); Object.assign(it, r.item); onChange(); } catch (e) { alert(e.message); }
-    });
-    const tools = el("div", { class: "row cm-tools" }, like);
-    if (it.canDelete) {
-      tools.append(el("button", { class: "link", type: "button", onclick: async () => {
-        if (!confirm("이 글을 지울까요?")) return;
-        try { await post({ action: "del", id: it.id }); onChange(true); } catch (e) { alert(e.message); }
+    const blockedNames = blocked();
+    const isBlocked = !it.mine && it.name && blockedNames.includes(it.name);
+    const act = async (b, done) => { try { const r = await post(b); done ? done(r) : ctx.reload(); } catch (e) { alert(e.message); } };
+    const needLogin = () => { if (!S.isLoggedIn()) { S.openAccount(); return true; } return false; };
+
+    const head = el("div", { class: "cm-head" },
+      it.parent ? null : el("span", { class: `cm-kind k-${it.kind}`, text: kind.label }),
+      it.status ? el("span", { class: `cm-st s-${it.status}`, text: STATUS[it.status] }) : null,
+      it.deleted ? null : el("b", { text: it.name }),
+      el("span", { class: "muted small", text: ago(it.t) }),
+      ctx.admin && it.reports ? el("span", { class: "cm-st s-rep", text: `신고 ${it.reports}` }) : null,
+      ctx.showPlace && !it.parent ? el("a", { class: "cm-place", href: place(it.key).href, text: place(it.key).name }) : null);
+
+    let body;
+    if (it.deleted) body = el("p", { class: "cm-text muted", text: "삭제된 댓글이에요." });
+    else if (isBlocked) {
+      body = el("p", { class: "cm-text muted" }, "🚫 차단한 사람의 글이에요. ",
+        el("button", { class: "link", type: "button", onclick: () => { setBlocked(blocked().filter((n) => n !== it.name)); ctx.reload(); } }, "차단 풀기"));
+    } else if (it.hidden && !it.text) body = el("p", { class: "cm-text muted", text: "🚨 신고가 많아 가려진 글이에요." });
+    else body = el("p", { class: "cm-text" + (it.hidden ? " hidden-note" : "") }, rich(it.text));
+
+    const tools = el("div", { class: "row cm-tools" });
+    const replyBox = el("div", { class: "cm-reply hidden" });
+    if (!it.deleted && !isBlocked) {
+      tools.append(el("button", { class: "chip like" + (it.liked ? " on" : ""), type: "button", title: "도움돼요",
+        onclick: () => { if (!needLogin()) act({ action: "like", id: it.id }); } }, `👍 ${it.likes}`));
+      if (!it.parent) tools.append(el("button", { class: "link", type: "button", onclick: () => {
+        if (needLogin()) return;
+        replyBox.classList.toggle("hidden");
+        if (!replyBox.firstChild) replyBox.append(composer(ctx.key || it.key, ctx.reload, it.id));
+      } }, "답글"));
+      if (it.canDelete) tools.append(el("button", { class: "link", type: "button", onclick: () => {
+        if (confirm("이 글을 지울까요?")) act({ action: "del", id: it.id });
       } }, "지우기"));
+      if (!it.mine && S.isLoggedIn()) {
+        tools.append(el("button", { class: "link", type: "button", disabled: it.reported, onclick: () => {
+          if (confirm("이 글을 신고할까요? (욕설·도배·광고·개인정보 등) 3명이 신고하면 가려져요.")) act({ action: "report", id: it.id });
+        } }, it.reported ? "신고함" : "🚨 신고"));
+        tools.append(el("button", { class: "link", type: "button", onclick: () => {
+          if (!confirm(`${it.name} 님을 차단할까요? 이 사람의 글이 내 화면에서 가려져요.`)) return;
+          setBlocked([...new Set([...blocked(), it.name])]); ctx.reload();
+        } }, "🚫 차단"));
+      }
     }
-    if (admin && (it.kind === "request" || it.kind === "bug" || it.status)) {
-      const sel = el("select", { class: "cm-status", "aria-label": "상태" },
-        Object.entries(STATUS).map(([v, t]) => { const o = el("option", { value: v }, t || "상태 없음"); if (v === it.status) o.selected = true; return o; }));
-      sel.addEventListener("change", async () => {
-        try { const r = await post({ action: "status", id: it.id, status: sel.value }); Object.assign(it, r.item); onChange(); } catch (e) { alert(e.message); }
-      });
-      tools.append(sel);
+    if (ctx.admin && !it.deleted) {
+      if (!it.parent && (it.kind === "request" || it.kind === "bug" || it.status)) {
+        const sel = el("select", { class: "cm-status", "aria-label": "상태" },
+          Object.entries(STATUS).map(([v, t]) => { const o = el("option", { value: v }, t || "상태 없음"); if (v === it.status) o.selected = true; return o; }));
+        sel.addEventListener("change", () => act({ action: "status", id: it.id, status: sel.value }));
+        tools.append(sel);
+      }
+      tools.append(el("button", { class: "link adm", type: "button", onclick: () => act({ action: "hide", id: it.id, hidden: !it.hidden }) }, it.hidden ? "가림 풀기" : "가리기"));
+      if (!it.mine) tools.append(el("button", { class: "link adm", type: "button", onclick: () => {
+        if (confirm(`${it.name} 님의 글쓰기를 막을까요? (게시판에서 풀 수 있어요)`)) act({ action: "ban", id: it.id }, () => { alert("글쓰기를 막았어요."); ctx.reload(); });
+      } }, "글쓰기 정지"));
     }
-    const p = showPlace ? place(it.key) : null;
-    return el("article", { class: "cm" + (it.mine ? " mine" : "") },
-      el("div", { class: "cm-head" },
-        el("span", { class: `cm-kind k-${it.kind}`, text: kind.label }),
-        it.status ? el("span", { class: `cm-st s-${it.status}`, text: STATUS[it.status] }) : null,
-        el("b", { text: it.name }),
-        el("span", { class: "muted small", text: ago(it.t) }),
-        p ? el("a", { class: "cm-place", href: p.href, text: p.name }) : null),
-      el("p", { class: "cm-text", text: it.text }),
-      tools);
+
+    const node = el("article", { class: "cm" + (it.mine ? " mine" : "") + (it.parent ? " reply" : "") }, head, body, tools, replyBox);
+    if (ctx.replies && ctx.replies.length) {
+      node.append(el("div", { class: "cm-replies" }, ctx.replies.map((r) => itemEl(r, { ...ctx, replies: null }))));
+    }
+    return node;
   }
 
-  // ── 글쓰기 칸
-  function composer(key, onPosted) {
+  // 목록 → 원글 + 답글 묶음 (답글은 오래된 순)
+  function threads(items) {
+    const kids = new Map();
+    items.filter((x) => x.parent).forEach((x) => { if (!kids.has(x.parent)) kids.set(x.parent, []); kids.get(x.parent).push(x); });
+    kids.forEach((a) => a.sort((x, y) => x.t - y.t));
+    return items.filter((x) => !x.parent).map((x) => ({ it: x, replies: kids.get(x.id) || [] }))
+      .filter((x) => !x.it.deleted || x.replies.length);
+  }
+
+  // ── 글쓰기 칸 (parent 가 있으면 답글)
+  function composer(key, onPosted, parent) {
     let kind = "opinion";
-    const ta = el("textarea", { class: "answer-note", rows: "3", maxlength: "1000", placeholder: KINDS.opinion.hint });
-    const kinds = el("div", { class: "seg" }, Object.entries(KINDS).map(([k, v]) => {
+    const emos = [];
+    const ta = el("textarea", { class: "answer-note", rows: parent ? "2" : "3", maxlength: "1000", placeholder: parent ? "답글을 써 주세요" : KINDS.opinion.hint });
+    const kinds = parent ? null : el("div", { class: "seg" }, Object.entries(KINDS).map(([k, v]) => {
       const b = el("button", { class: "chip" + (k === kind ? " on" : ""), type: "button" }, v.label);
       b.addEventListener("click", () => {
         kind = k; ta.placeholder = v.hint;
@@ -97,21 +149,28 @@
       });
       return b;
     }));
+    const chosen = el("div", { class: "emo-chosen" });
+    const paintChosen = () => chosen.replaceChildren(...emos.map((e, i) => el("span", { class: "emo-slot" },
+      el("img", { src: e.src, alt: "" }), el("button", { class: "x", type: "button", "aria-label": "빼기", onclick: () => { emos.splice(i, 1); paintChosen(); } }, "✕"))));
+    const picker = S.emoPicker ? S.emoPicker((token, src) => { if (emos.length < 10) { emos.push({ token, src }); paintChosen(); } }) : null;
     const msg = el("div", { class: "msg" });
-    const btn = el("button", { class: "btn", type: "button" }, "남기기");
+    const btn = el("button", { class: "btn" + (parent ? " small" : ""), type: "button" }, parent ? "답글 달기" : "남기기");
     btn.addEventListener("click", async () => {
       if (!S.isLoggedIn()) return S.openAccount();
       btn.disabled = true; msg.textContent = "";
       try {
-        await post({ action: "add", key, kind, text: ta.value });
-        ta.value = ""; msg.textContent = "올렸어요. 고마워요!"; msg.className = "msg ok";
+        const text = [ta.value.trim(), emos.map((e) => e.token).join("")].filter(Boolean).join(" ");
+        await post({ action: "add", key, kind, text, parent });
+        ta.value = ""; emos.length = 0; paintChosen();
+        msg.textContent = "올렸어요. 고마워요!"; msg.className = "msg ok";
         onPosted();
       } catch (e) { msg.textContent = e.message; msg.className = "msg err"; }
       finally { btn.disabled = false; }
     });
     const who = S.isLoggedIn() ? el("span", { class: "muted small", text: `${S.userName()} 님으로 남겨요` })
       : el("button", { class: "link", type: "button", onclick: () => S.openAccount() }, "로그인하면 글을 남길 수 있어요");
-    return el("div", { class: "cm-compose" }, kinds, ta, el("div", { class: "row" }, btn, who), msg);
+    return el("div", { class: "cm-compose" + (parent ? " small" : "") }, kinds, ta, chosen, picker ? picker.panel : null,
+      el("div", { class: "row" }, btn, picker ? picker.button : null, parent ? null : who), msg);
   }
 
   // ── 공부법·개념 아래 댓글 칸
@@ -122,12 +181,13 @@
       el("div", { class: "cm-title" }, el("b", {}, "💬 ", label || "의견 · 나만의 공부법"), count,
         el("a", { class: "link", href: "#/board" }, "전체 게시판 →")),
       el("p", { class: "muted small", text: "이 페이지에 대한 의견, 나만의 공부법, 추가했으면 하는 내용을 남겨 주세요. 모두 함께 봐요." }));
-    let loaded = false;
     async function load() {
       try {
         const r = await get(key);
-        count.textContent = `${r.items.length}개`;
-        listEl.replaceChildren(...(r.items.length ? r.items.map((it) => itemEl(it, r.admin, (gone) => (gone ? load() : load()))) :
+        const th = threads(r.items);
+        count.textContent = `${th.length}개`;
+        const ctx = { admin: r.admin, key, reload: load };
+        listEl.replaceChildren(...(th.length ? th.map((t) => itemEl(t.it, { ...ctx, replies: t.replies })) :
           [el("p", { class: "muted small", text: "아직 글이 없어요. 첫 글을 남겨 보세요!" })]));
       } catch (e) {
         listEl.replaceChildren(el("p", { class: "muted small", text: e.message }));
@@ -140,7 +200,7 @@
         if (!ok) return;
         box.classList.remove("hidden");
         box.append(composer(key, load), listEl);
-        if (!loaded) { loaded = true; load(); }
+        load();
       });
     }
     return box;
@@ -153,6 +213,7 @@
     const filter = { kind: "", status: "" };
     const listEl = el("div", { class: "cm-list" });
     const info = el("div", { class: "muted small" });
+    const adminBox = el("div");
     let all = [], admin = false;
 
     const chips = (label, field, options) => el("div", { class: "seg" }, el("b", {}, label), options.map(([v, t]) => {
@@ -165,22 +226,33 @@
       return b;
     }));
     function paint() {
-      const items = all.filter((it) => (!filter.kind || it.kind === filter.kind) &&
-        (!filter.status || (filter.status === "open" ? it.status !== "done" : it.status === filter.status)));
-      info.textContent = `${items.length}개`;
-      listEl.replaceChildren(...(items.length ? items.map((it) => itemEl(it, admin, (gone) => (gone ? load() : paint()), true))
+      const th = threads(all).filter(({ it }) => (!filter.kind || it.kind === filter.kind) &&
+        (!filter.status || (filter.status === "open" ? it.status !== "done" : filter.status === "reported" ? (it.reports || it.hidden) : it.status === filter.status)));
+      info.textContent = `${th.length}개`;
+      listEl.replaceChildren(...(th.length ? th.map((t) => itemEl(t.it, { admin, reload: load, showPlace: true, replies: t.replies }))
         : [el("p", { class: "muted", text: "해당하는 글이 없어요." })]));
     }
     async function load() {
-      try { const r = await get(""); all = r.items; admin = r.admin; paint(); }
-      catch (e) { listEl.replaceChildren(el("p", { class: "muted", text: e.message })); }
+      try {
+        const r = await get(""); all = r.items; admin = r.admin; paint();
+        if (admin && !adminBox.firstChild) adminPanel();
+      } catch (e) { listEl.replaceChildren(el("p", { class: "muted", text: e.message })); }
+    }
+    // 관리자: 정지 목록
+    async function adminPanel() {
+      const list = el("div", { class: "row" });
+      const paintBans = (bans) => list.replaceChildren(...(bans.length ? bans.map((b) => el("span", { class: "chip" }, b.name, " ",
+        el("button", { class: "link", type: "button", onclick: async () => paintBans((await post({ action: "unban", name: b.name })).bans) }, "풀기")))
+        : [el("span", { class: "muted small" }, "글쓰기 정지된 사람이 없어요.")]));
+      adminBox.replaceChildren(el("details", { class: "acct-sec" }, el("summary", {}, "🛡 관리자: 글쓰기 정지 목록"), list));
+      try { paintBans((await post({ action: "bans" })).bans); } catch (e) { list.textContent = e.message; }
     }
     // 아직 반영 안 된 요청·오류를 한 번에 복사 → Claude 에게 붙여 넣기
     const copyBtn = el("button", { class: "btn ghost small", type: "button" }, "📋 반영할 요청 복사");
     copyBtn.addEventListener("click", async () => {
-      const open = all.filter((it) => (it.kind === "request" || it.kind === "bug" || it.kind === "tip") && it.status !== "done");
+      const open = all.filter((it) => !it.parent && !it.deleted && !it.hidden && (it.kind === "request" || it.kind === "bug" || it.kind === "tip") && it.status !== "done");
       const text = "스토리 공부방 피드백 — 반영해 주세요\n\n" + open.map((it, i) =>
-        `${i + 1}. [${KINDS[it.kind].label.replace(/^\S+\s/, "")}] ${place(it.key).name} — ${it.text.replace(/\n/g, " ")} (${it.name}, 👍${it.likes})`).join("\n");
+        `${i + 1}. [${KINDS[it.kind].label.replace(/^\S+\s/, "")}] ${place(it.key).name} — ${it.text.replace(/\[\[emo:[^\]]+\]\]/g, "(이모티콘)").replace(/\n/g, " ")} (${it.name}, 👍${it.likes})`).join("\n");
       try { await navigator.clipboard.writeText(text); copyBtn.textContent = `복사했어요 (${open.length}개)`; }
       catch (e) { prompt("아래 내용을 복사하세요", text); }
     });
@@ -189,8 +261,10 @@
       el("div", { class: "cm-title" }, el("b", {}, "공부방 전체에 글 남기기")),
       composer("general", load)));
     app.append(chips("종류", "kind", [["", "전체"], ...Object.entries(KINDS).map(([k, v]) => [k, v.label])]));
-    app.append(chips("상태", "status", [["", "전체"], ["open", "아직 반영 전"], ["planned", "반영 예정"], ["done", "반영 완료"]]));
-    app.append(el("div", { class: "row" }, info, copyBtn));
+    app.append(chips("상태", "status", [["", "전체"], ["open", "아직 반영 전"], ["planned", "반영 예정"], ["done", "반영 완료"], ["reported", "🚨 신고됨"]]));
+    app.append(adminBox);
+    app.append(el("div", { class: "row" }, info, copyBtn,
+      blocked().length ? el("span", { class: "muted small" }, `🚫 차단 ${blocked().length}명`) : null));
     app.append(listEl);
     load();
   };

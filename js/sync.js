@@ -132,7 +132,8 @@
       const remote = await api("sync");
       const merged = merge(snapshot(), remote.keys || {});
       const changed = apply(merged);
-      await api("sync", { method: "PUT", body: JSON.stringify({ keys: merged }) });
+      const put = await api("sync", { method: "PUT", body: JSON.stringify({ keys: merged }) });
+      if (put && put.points) setPoints(put.points);
       lastOk = Date.now();
       setStatus("");
       if (changed) S.reload();
@@ -149,8 +150,31 @@
 
   function logout() {
     auth = null; LS.del(AUTH); LS.del(META);
+    points = null; pointListeners.forEach((f) => f(null));
     setStatus(""); paint();
   }
+
+  // ── 포인트 (서버가 계산: 처음 맞힌 문제마다 1점 + 이모티콘 판매 수익 − 쓴 것)
+  let points = null;
+  const pointListeners = [];
+  function setPoints(p) {
+    const before = points ? points.points : null;
+    points = p;
+    pointListeners.forEach((f) => f(p));
+    if (p && p.added > 0) toast(`🪙 +${p.added} 포인트! (지금 ${p.points})`);
+    else if (before != null && p && p.points > before) toast(`🪙 지금 ${p.points} 포인트`);
+  }
+  S.points = () => points;
+  S.onPoints = (f) => pointListeners.push(f);
+  S.refreshPoints = async () => { if (!auth) return null; try { setPoints(await api("points")); } catch (e) { /* 무시 */ } return points; };
+  S.setPoints = setPoints;
+  function toast(text) {
+    const t = el("div", { class: "toast", role: "status" }, text);
+    document.body.append(t);
+    setTimeout(() => t.classList.add("out"), 2200);
+    setTimeout(() => t.remove(), 2700);
+  }
+  S.toast = toast;
 
   // ── 화면
   function setStatus(s) { status = s; paint(); }
@@ -193,6 +217,7 @@
   function signedIn(r) {
     auth = { token: r.token, name: r.name || (auth && auth.name) };
     LS.set(AUTH, JSON.stringify(auth));
+    setTimeout(() => S.refreshPoints(), 0);
   }
   // 버튼을 누르는 동안 두 번 누르지 않게
   function busyBtn(btn, fn) {
@@ -426,7 +451,7 @@
   document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") sync(); else later(300); });
   window.addEventListener("online", () => later(300));
   setInterval(() => { if (document.visibilityState === "visible") sync(); }, 120000);
-  document.addEventListener("DOMContentLoaded", () => { paint(); later(200); });
+  document.addEventListener("DOMContentLoaded", () => { paint(); later(200); S.refreshPoints(); });
 
   S._sync = { merge, snapshot, fp, get noServer() { return noServer; } };
 })();
