@@ -252,6 +252,9 @@
           h("div", { class: "htt" }, s ? s.name : "📚 스토리 공부방"),
           h("div", { class: "hts" }, s && s.embed ? s.desc : `${s ? s.units.length + "단원 · " : ""}${st.done}/${st.total} 문항 풂`)),
         h("div", { class: "topbtns" },
+          window.STORY.timerChip ? window.STORY.timerChip() : null,
+          h("a", { class: "ib ghost icon", href: "#/search", title: "검색 ( / )", "aria-label": "검색" }, "🔍"),
+          window.STORY.openSettings ? h("button", { class: "ib ghost icon", type: "button", title: "설정", "aria-label": "설정", onclick: () => window.STORY.openSettings() }, "⚙️") : null,
           (() => { const p = window.STORY.points && window.STORY.points(); return p ? h("a", { class: "ib ghost pts", href: "#/shop", title: "포인트 · 이모티콘 상점" }, `🪙 ${p.points}`) : null; })(),
           h("button", { class: "ib ghost", id: "acct", type: "button", onclick: () => window.STORY.openAccount && window.STORY.openAccount() },
             (window.STORY.accountLabel && window.STORY.accountLabel()) || "로그인"),
@@ -306,10 +309,17 @@
       type: "date", class: "date-in", value: set.examDate || "", "aria-label": "시험 날짜",
       onchange: (e) => { const v = load(SKEY); v.examDate = e.target.value || undefined; store(SKEY, v); save(); render(); },
     });
+    const S = window.STORY;
+    const goal = S.dailyGoal ? S.dailyGoal() : 0;
+    const mins = S.studyMinutes ? S.studyMinutes() : 0;
     return h("div", { class: "today" },
       h("label", { class: "tcell dday" }, h("b", {}, dday || "D-?"), h("span", {}, dday ? "시험까지" : "시험 날짜 정하기"), input),
-      h("div", { class: "tcell" }, h("b", {}, String(n)), h("span", {}, "오늘 푼 문제")),
-      h("div", { class: "tcell" }, h("b", {}, `${streak}일`), h("span", {}, "연속 공부")));
+      h("div", { class: "tcell" + (goal && n >= goal ? " goal-done" : "") },
+        h("b", {}, goal ? `${n}/${goal}` : String(n)), h("span", {}, goal ? (n >= goal ? "🎉 오늘 목표 달성!" : "오늘 목표") : "오늘 푼 문제"),
+        goal ? h("div", { class: "bar" }, h("span", { class: "bar-o", style: `width:${Math.min(100, Math.round((n / goal) * 100))}%` })) : null),
+      h("div", { class: "tcell" }, h("b", {}, `${streak}일`), h("span", {}, "연속 공부")),
+      h("button", { class: "tcell", type: "button", title: "공부 타이머", onclick: () => S.openTimer && S.openTimer() },
+        h("b", {}, `${mins}분`), h("span", {}, "⏱ 오늘 집중")));
   }
 
   // 로그인 안 했을 때 홈에 한 번 보여 주는 안내 (서버가 있는 주소에서만, 닫으면 다시 안 뜸)
@@ -348,7 +358,8 @@
       h("a", { class: "qtile" + (wrongCount() ? " warn" : ""), href: "#/wrong" }, h("b", {}, "오답노트"), h("span", {}, `${wrongCount()}문항`)),
       h("a", { class: "qtile board-tile", href: "#/board" }, h("b", {}, "💬 피드백 게시판"), h("span", {}, "의견 · 나만의 공부법 · 추가 요청")),
       h("a", { class: "qtile shop-tile", href: "#/shop" }, h("b", {}, "😀 이모티콘 상점"), h("span", {}, "한 문제 맞히면 🪙1 · 모아서 사고팔기")),
-      h("a", { class: "qtile note-tile", href: "#/note" }, h("b", {}, "📓 필기장"), h("span", {}, "펜 · 태블릿 · 마우스로 필기")));
+      h("a", { class: "qtile note-tile", href: "#/note" }, h("b", {}, "📓 필기장"), h("span", {}, "펜 · 태블릿 · 마우스로 필기")),
+      h("a", { class: "qtile star-tile", href: "#/star" }, h("b", {}, "⭐ 별표 문제"), h("span", {}, `${Object.keys(load(STAR)).length}문항 · 나중에 다시 볼 것`)));
     app.append(hero, scope);
 
     const guided = subjects.filter((x) => x.guide);
@@ -586,6 +597,7 @@
       card.append(itemCard(s, it, g, () => { refreshSummary(); paintBar(); }));
       typeset(card);
       // 넓은 화면에서는 지문을 왼쪽에 붙여 둠
+      if (window.STORY.inkPage) window.STORY.inkPage.setKey("q:" + it.id);   // 문제마다 필기가 따로 (저절로 저장)
       if (g.passage) {
         const side = h("aside", { class: "pside", html: g.passage });
         typeset(side);
@@ -601,10 +613,16 @@
     };
     if (keyHandler) document.removeEventListener("keydown", keyHandler);
     keyHandler = (e) => {
+      if (e.target && /INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) return;   // 답 입력 중 Enter 는 채점만
       if (!document.body.contains(stage)) { document.removeEventListener("keydown", keyHandler); keyHandler = null; return; }
       if (/INPUT|TEXTAREA/.test(document.activeElement && document.activeElement.tagName) || e.altKey || e.metaKey || e.ctrlKey) return;
       if (e.key === "ArrowRight") go(i + 1);
       if (e.key === "ArrowLeft") go(i - 1);
+      // 1~5: 보기 고르기 · Enter: 채점한 뒤 다음 · S: 별표 · W: 필기
+      if (/^[1-9]$/.test(e.key)) { const c = stage.querySelectorAll(".fcard .choice")[+e.key - 1]; if (c) c.click(); }
+      if (e.key === "Enter" && stage.querySelector(".fcard .result")) go(i + 1);
+      if (e.key.toLowerCase() === "s") { const b = stage.querySelector(".fcard .star-btn"); if (b) b.click(); }
+      if (e.key.toLowerCase() === "w" && window.STORY.inkPage) window.STORY.inkPage.toggle();
     };
     document.addEventListener("keydown", keyHandler);
     draw();
@@ -638,11 +656,83 @@
     return card;
   }
 
+  // ⭐ 별표 (나중에 다시 볼 문제) — story-star-v1 { 문제id: 시각 }, 로그인하면 동기화
+  const STAR = "story-star-v1";
+  function toggleStar(id) {
+    const m = load(STAR);
+    if (m[id]) delete m[id]; else m[id] = Date.now();
+    store(STAR, m);
+    return !!m[id];
+  }
+  function starBtn(it) {
+    const on = !!load(STAR)[it.id];
+    const b = h("button", { class: "star-btn" + (on ? " on" : ""), type: "button", title: "별표 — 나중에 다시 보기 (S)", "aria-label": "별표", "aria-pressed": String(on) }, on ? "★" : "☆");
+    b.addEventListener("click", () => {
+      const now = toggleStar(it.id);
+      b.classList.toggle("on", now); b.textContent = now ? "★" : "☆"; b.setAttribute("aria-pressed", String(now));
+      if (window.STORY.toast) window.STORY.toast(now ? "⭐ 별표했어요" : "별표를 뺐어요");
+    });
+    return b;
+  }
+  function viewStar(app, sid) {
+    const only = subjects.find((x) => x.id === sid);
+    const stars = load(STAR);
+    app.append(h("h1", { class: "page-title" }, "⭐ 별표 문제", only ? ` · ${only.name}` : ""));
+    app.append(h("p", { class: "muted" }, "문제 오른쪽 위 ☆ 를 누르면 여기에 모여요. 헷갈리는 문제, 시험 전에 다시 볼 문제를 별표해 두세요."));
+    let count = 0;
+    (only ? [only] : subjects).forEach((s) => s.units.forEach((u) => u.groups.forEach((g, gi) => {
+      const its = g.items.filter((it) => stars[it.id]);
+      if (!its.length) return;
+      count += its.length;
+      app.append(groupCard(s, g, gi + 1, its, null, `${s.name} · ${u.title}`));
+    })));
+    if (!count) app.append(h("div", { class: "empty" }, "아직 별표한 문제가 없어요."));
+  }
+
+  // ── 🔍 검색: 문제 · 지문 · 개념 · 공부법
+  const strip = (html) => String(html || "").replace(/<[^>]+>/g, " ").replace(/\$|\\[a-z]+|[{}]/gi, " ").replace(/&[a-z]+;/g, " ").replace(/\s+/g, " ").trim();
+  function viewSearch(app, q0) {
+    app.append(h("h1", { class: "page-title" }, "🔍 검색"));
+    const input = h("input", { class: "answer-input search-in", type: "search", placeholder: "문제 · 지문 · 개념 · 공부법에서 찾기 (예: 도함수, 기본권, print)", value: q0 || "", "aria-label": "검색어" });
+    const out = h("div", { class: "search-out" });
+    app.append(input, out);
+    const run = () => {
+      const q = input.value.trim().toLowerCase();
+      history.replaceState(null, "", "#/search/" + encodeURIComponent(input.value.trim()));
+      if (q.length < 1) { out.replaceChildren(h("p", { class: "muted small" }, "두 글자 이상 쓰면 더 잘 찾아져요.")); return; }
+      const res = [];
+      const hit = (text) => { const t = strip(text); const i = t.toLowerCase().indexOf(q); return i < 0 ? null : (i > 30 ? "…" : "") + t.slice(Math.max(0, i - 30), i + q.length + 50) + "…"; };
+      subjects.forEach((s) => {
+        if (s.guide) { const m = hit(s.guide); if (m) res.push({ kind: "📘 공부법", title: s.name, href: `#/guide/${s.id}`, m }); }
+        s.units.forEach((u) => {
+          if (u.concept) { const m = hit(u.concept); if (m) res.push({ kind: "💡 개념", title: `${s.name} · ${u.title}`, href: `#/s/${s.id}/${u.id}/concept`, m }); }
+          let k = 0;
+          u.groups.forEach((g, gi) => g.items.forEach((it) => {
+            const idx = k++;
+            const m = hit([g.q, g.ptitle, it.label, it.q, it.a, (it.choices || []).join(" "), it.explain, (it.steps || []).join(" ")].join(" ")) || hit(g.passage);
+            if (m) res.push({ kind: "✏️ 문제", title: `${s.name} · ${u.title} ${gi + 1}번 ${it.label || ""}`, m, go: () => { setPos(`#/s/${s.id}/${u.id}`, idx); location.hash = `#/s/${s.id}/${u.id}/one`; }, st: progress[it.id] });
+          }));
+        });
+      });
+      out.replaceChildren(h("p", { class: "muted small" }, `${res.length}개 찾았어요${res.length > 80 ? " (앞의 80개만 보여요)" : ""}`),
+        ...res.slice(0, 80).map((r) => {
+          const box = h(r.href ? "a" : "button", { class: "search-hit", ...(r.href ? { href: r.href } : { type: "button", onclick: r.go }) },
+            h("div", {}, h("span", { class: "chip" }, r.kind), " ", h("b", {}, r.title), r.st ? h("span", { class: r.st === "o" ? "ok-dot" : "x-dot" }, r.st === "o" ? " ⭕" : " ❌") : null),
+            h("div", { class: "muted small" }, r.m));
+          return box;
+        }));
+    };
+    let t = 0;
+    input.addEventListener("input", () => { clearTimeout(t); t = setTimeout(run, 200); });
+    run();
+    setTimeout(() => input.focus(), 50);
+  }
+
   // ✏️ 필기 버튼들 (js/ink.js) — 카드 머리 오른쪽에 붙음
   function inkTools(card, key, scratch) {
     const S = window.STORY;
     if (!S.inkButton) return null;
-    return h("span", { class: "ink-tools" }, S.inkButton(card, key),
+    return h("span", { class: "ink-tools" }, S.inkButton(),
       scratch ? h("button", { class: "ink-toggle", type: "button", title: "넓은 연습장에 풀기", onclick: () => S.openScratch(scratch.key, scratch.title) }, "📓 연습장") : null);
   }
 
@@ -657,7 +747,7 @@
   function itemCard(s, it, g, onChange) {
     const el = h("div", { class: "item", "data-id": it.id });
     const draw = () => {
-      el.replaceChildren();
+      el.replaceChildren(starBtn(it));
       const st = progress[it.id];
       el.className = "item" + (st === "o" ? " is-o" : st === "x" ? " is-x" : "") + (it.type === "self" ? " is-self" : "");
       if (it.label || it.q) {
@@ -849,7 +939,7 @@
         const pool = shuffle(refresh());
         if (!pool.length) { info.textContent = "고른 범위에 문제가 없어요."; return; }
         const qs = opts.count ? pool.slice(0, opts.count) : pool;
-        if (window.STORY.inkClear) window.STORY.inkClear("ink:t:");   // 지난 시험의 필기는 지움
+        if (window.STORY.inkClear) window.STORY.inkClear("ink:p:test/");   // 지난 시험의 필기는 지움
         testRun = { sid, qs, ans: {}, start: Date.now(), limit: opts.limit * 60000, done: false };
         render();
       } }, "시작하기")));
@@ -953,7 +1043,7 @@
     const wrong = run.qs.filter((q) => !q.ok);
     app.append(h("div", { class: "row" },
       wrong.length ? h("button", { class: "btn", type: "button", onclick: () => {
-        if (window.STORY.inkClear) window.STORY.inkClear("ink:t:");   // 지난 시험의 필기는 지움
+        if (window.STORY.inkClear) window.STORY.inkClear("ink:p:test/");   // 지난 시험의 필기는 지움
         testRun = { sid: run.sid, qs: shuffle(wrong.map((q) => ({ it: q.it, g: q.g, u: q.u, gi: q.gi }))), ans: {}, start: Date.now(), limit: run.limit, done: false };
         render();
       } }, "틀린 것만 다시 시험") : null,
@@ -994,7 +1084,10 @@
     const y = route === lastRoute ? window.scrollY : 0;
     app.replaceChildren();
     document.body.classList.remove("embedded", "wide-note");
-    renderTop(["s", "wrong", "test", "guide", "note"].includes(parts[0]) ? parts[1] : null);
+    if (window.STORY.applySettings) window.STORY.applySettings();
+    // 화면 전체 필기: 문제·오답·시험·공부법 화면에서만, 화면마다 따로 저장
+    if (window.STORY.inkPage) window.STORY.inkPage.setKey(["s", "wrong", "test", "guide"].includes(parts[0]) && parts[1] ? route : null);
+    renderTop(["s", "wrong", "test", "guide", "note", "star"].includes(parts[0]) ? parts[1] : null);
     if (parts[0] === "s" && parts[2]) viewUnit(app, parts[1], parts[2], parts[3]);
     else if (parts[0] === "s" && parts[1]) viewSubject(app, parts[1]);
     else if (parts[0] === "wrong") viewWrong(app, parts[1]);
@@ -1003,12 +1096,20 @@
     else if (parts[0] === "board" && window.STORY.viewBoard) window.STORY.viewBoard(app);
     else if (parts[0] === "shop" && window.STORY.viewShop) window.STORY.viewShop(app, parts[1]);
     else if (parts[0] === "note" && window.STORY.viewNotes) window.STORY.viewNotes(app, parts[1]);
+    else if (parts[0] === "star") viewStar(app, parts[1]);
+    else if (parts[0] === "search") viewSearch(app, parts.slice(1).join("/"));
     else viewHome(app);
     window.scrollTo(0, y);
     lastRoute = route;
   }
 
   window.addEventListener("hashchange", render);
+  // 어디서든 / 를 누르면 검색
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "/" || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (/INPUT|TEXTAREA|SELECT/.test(document.activeElement && document.activeElement.tagName)) return;
+    e.preventDefault(); location.hash = "#/search";
+  });
   document.addEventListener("DOMContentLoaded", () => {
     render();
     // 포인트가 바뀌면 위쪽 🪙 와 상점 화면을 새로 그림
@@ -1019,7 +1120,7 @@
   Object.assign(window.STORY, {
     onChange: (f) => listeners.push(f),
     reload() { progress = load(KEY); times = load(TKEY); render(); },
-    today, load,
+    today, load, render,
   });
   // 테스트용
   window.STORY._check = { norm, same, evalNum, subjects };

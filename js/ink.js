@@ -68,7 +68,7 @@
     const bctx = base.getContext("2d");
     let strokes = loadInk(key);
     const undo = [], redo = [];
-    let enabled = false, W = 0, H = 0, dpr = 1, k = 1;
+    let enabled = false, W = 0, H = 0, dpr = 1, k = 1, ox = 0;   // ox: 가운데 기준일 때 x 원점
     let cur = null, erasing = null, scrollY = null, frame = 0, saveTimer = 0;
     const touches = new Set();
     const listeners = [];
@@ -77,6 +77,7 @@
       W = host.clientWidth;
       H = opts.height ? opts.height() : host.clientHeight;
       k = opts.logicalWidth ? W / opts.logicalWidth : 1;
+      ox = opts.center ? W / 2 : 0;
       dpr = Math.min(window.devicePixelRatio || 1, 2.5);
       if (H * dpr > 16000) dpr = 16000 / H;
       for (const c of [cv, base]) { c.width = Math.max(1, Math.round(W * dpr)); c.height = Math.max(1, Math.round(H * dpr)); }
@@ -112,7 +113,7 @@
     }
     function rebuild() {
       bctx.setTransform(1, 0, 0, 1, 0, 0); bctx.clearRect(0, 0, base.width, base.height);
-      bctx.setTransform(dpr * k, 0, 0, dpr * k, 0, 0);
+      bctx.setTransform(dpr * k, 0, 0, dpr * k, dpr * ox, 0);
       // 형광펜을 먼저 깔고 그 위에 글씨
       strokes.forEach((s) => s.t === "hl" && strokePath(bctx, s));
       strokes.forEach((s) => s.t !== "hl" && strokePath(bctx, s));
@@ -122,7 +123,7 @@
       frame = 0;
       ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, cv.width, cv.height);
       ctx.drawImage(base, 0, 0);
-      if (cur) { ctx.setTransform(dpr * k, 0, 0, dpr * k, 0, 0); strokePath(ctx, cur); }
+      if (cur) { ctx.setTransform(dpr * k, 0, 0, dpr * k, dpr * ox, 0); strokePath(ctx, cur); }
       if (erasing && erasing.at) {
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         ctx.beginPath(); ctx.strokeStyle = "#8a94a6"; ctx.lineWidth = 1;
@@ -165,18 +166,19 @@
 
     // ── 입력
     const pos = (e) => { const r = cv.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
+    const lg = (x, y) => [(x - ox) / k, y / k];
     const pressure = (e) => (e.pointerType === "pen" && e.pressure > 0 ? e.pressure : 0.5);
     const scroller = () => opts.scroller || window;
 
     function down(e) {
-      if (!enabled) return;
+      if (!enabled || prefs.tool === "tap") return;
       if (e.pointerType === "pen" && !prefs.penSeen) { prefs.penSeen = true; savePrefs(); bar.sync(); }
       if (e.pointerType === "touch") {
         touches.add(e.pointerId);
         // 두 손가락이거나 손가락 쓰기를 껐으면 → 화면 넘기기
         if (touches.size > 1 || !fingerDraws()) {
           if (cur && cur.touch) { cur = null; schedule(); }
-          scrollY = { id: e.pointerId, y: e.clientY };
+          scrollY = { id: e.pointerId, y: e.clientY, x0: e.clientX, y0: e.clientY, t: Date.now() };
           e.preventDefault(); return;
         }
       }
@@ -186,8 +188,8 @@
       try { cv.setPointerCapture(e.pointerId); } catch (err) { /* 무시 */ }
       const [x, y] = pos(e);
       const rubber = prefs.tool === "eraser" || (e.buttons & 32) || e.button === 5 || (e.pointerType === "pen" && (e.buttons & 2));
-      if (rubber) { erasing = { id: e.pointerId, gone: [], at: [x, y] }; eraseAt(x / k, y / k); schedule(); return; }
-      cur = { id: e.pointerId, touch: e.pointerType === "touch", t: prefs.tool === "hl" ? "hl" : "pen", c: prefs.color, w: prefs.size, p: [x / k, y / k, pressure(e)] };
+      if (rubber) { erasing = { id: e.pointerId, gone: [], at: [x, y] }; eraseAt(...lg(x, y)); schedule(); return; }
+      cur = { id: e.pointerId, touch: e.pointerType === "touch", t: prefs.tool === "hl" ? "hl" : "pen", c: prefs.color, w: prefs.size, p: [...lg(x, y), pressure(e)] };
       schedule();
     }
     function move(e) {
@@ -197,23 +199,29 @@
       }
       if (erasing && e.pointerId === erasing.id) {
         const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
-        for (const ev of evs.length ? evs : [e]) { const [x, y] = pos(ev); eraseAt(x / k, y / k); erasing.at = [x, y]; }
+        for (const ev of evs.length ? evs : [e]) { const [x, y] = pos(ev); eraseAt(...lg(x, y)); erasing.at = [x, y]; }
         schedule(); e.preventDefault(); return;
       }
       if (!cur || e.pointerId !== cur.id) return;
       e.preventDefault();
       const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
       for (const ev of evs.length ? evs : [e]) {
-        const [x, y] = pos(ev), p = cur.p, n = p.length;
-        const lx = p[n - 3], ly = p[n - 2];
-        if ((x / k - lx) ** 2 + (y / k - ly) ** 2 < 0.6) continue;    // 너무 가까운 점은 건너뜀
-        p.push(x / k, y / k, pressure(ev));
+        const [x, y] = lg(...pos(ev)), p = cur.p, n = p.length;
+        if ((x - p[n - 3]) ** 2 + (y - p[n - 2]) ** 2 < 0.6) continue;    // 너무 가까운 점은 건너뜀
+        p.push(x, y, pressure(ev));
       }
       schedule();
     }
     function up(e) {
       touches.delete(e.pointerId);
-      if (scrollY && e.pointerId === scrollY.id) { scrollY = null; return; }
+      if (scrollY && e.pointerId === scrollY.id) {
+        // 살짝 톡 누른 것이면 → 밑에 있는 버튼·입력칸을 누른 것으로 (필기 중에도 손가락으로 답 고르기)
+        const tap = opts.passTap && e.type === "pointerup" && Date.now() - scrollY.t < 450 &&
+          Math.abs(e.clientX - scrollY.x0) < 10 && Math.abs(e.clientY - scrollY.y0) < 10;
+        scrollY = null;
+        if (tap) passTap(e.clientX, e.clientY);
+        return;
+      }
       if (erasing && e.pointerId === erasing.id) {
         if (erasing.gone.length) { undo.push({ del: erasing.gone }); redo.length = 0; changed(); }
         erasing = null; schedule(); return;
@@ -224,6 +232,14 @@
       delete s.id; delete s.touch;
       strokes.push(s); undo.push({ add: s }); redo.length = 0;
       strokePath(bctx, s); paint(); changed();
+    }
+    function passTap(x, y) {
+      cv.style.pointerEvents = "none";
+      const t = document.elementFromPoint(x, y);
+      cv.style.pointerEvents = "";
+      if (!t) return;
+      if (/INPUT|TEXTAREA|SELECT/.test(t.tagName)) t.focus();
+      t.click();
     }
     cv.addEventListener("pointerdown", down);
     cv.addEventListener("pointermove", move);
@@ -244,7 +260,8 @@
       get canUndo() { return undo.length > 0; },
       get canRedo() { return redo.length > 0; },
       onChange(f) { listeners.push(f); },
-      setEnabled(on) { enabled = on; cv.classList.toggle("on", on); },
+      setEnabled(on) { enabled = on; cv.classList.toggle("on", on && prefs.tool !== "tap"); },
+      refresh() { pad.setEnabled(enabled); },
       undo() {
         const op = undo.pop(); if (!op) return;
         if (op.add) strokes = strokes.filter((s) => s !== op.add);
@@ -266,16 +283,16 @@
       resize: size,
       save,
       // 그림으로 저장 (배경 함께)
-      toPNG(bg) {
+      toPNG(bg, clear) {
         const out = document.createElement("canvas");
         out.width = cv.width; out.height = cv.height;
         const o = out.getContext("2d");
-        o.fillStyle = "#fff"; o.fillRect(0, 0, out.width, out.height);
+        if (!clear) { o.fillStyle = "#fff"; o.fillRect(0, 0, out.width, out.height); }
         if (bg) bg(o, out.width, out.height, dpr * k);
         o.drawImage(base, 0, 0);
         return out.toDataURL("image/png");
       },
-      destroy() { if (saveTimer) save(); ro.disconnect(); cv.remove(); },
+      destroy(noSave) { if (saveTimer) noSave ? clearTimeout(saveTimer) : save(); ro.disconnect(); cv.remove(); },
     };
     const bar = { sync() {} };
     pad._bar = (b) => { bar.sync = b; };
@@ -287,12 +304,12 @@
   function toolbar(getPad, { onClose, extra } = {}) {
     const wrap = el("div", { class: "ink-bar", role: "toolbar", "aria-label": "필기 도구" });
     const btn = (label, title, on) => el("button", { class: "ink-b", type: "button", title, "aria-label": title, onclick: on }, label);
-    const tools = [["pen", "✒️", "펜 (P)"], ["hl", "🖍️", "형광펜 (H)"], ["eraser", "🧽", "지우개 (E)"]].map(([t, l, ti]) => {
+    const tools = [["pen", "✒️", "펜 (P)"], ["hl", "🖍️", "형광펜 (H)"], ["eraser", "🧽", "지우개 (E)"], ["tap", "👆", "누르기 — 필기를 잠깐 멈추고 버튼·답 누르기 (T)"]].map(([t, l, ti]) => {
       const b = btn(l, ti, () => { prefs.tool = t; savePrefs(); sync(); });
       b.dataset.tool = t; return b;
     });
     const colors = COLORS.map(([c, n]) => {
-      const b = el("button", { class: "ink-c", type: "button", title: n, "aria-label": n, style: `--c:${c}`, onclick: () => { prefs.color = c; if (prefs.tool === "eraser") prefs.tool = "pen"; savePrefs(); sync(); } });
+      const b = el("button", { class: "ink-c", type: "button", title: n, "aria-label": n, style: `--c:${c}`, onclick: () => { prefs.color = c; if (prefs.tool === "eraser" || prefs.tool === "tap") prefs.tool = "pen"; savePrefs(); sync(); } });
       b.dataset.color = c; return b;
     });
     const sizes = SIZES.map(([w, n]) => {
@@ -307,6 +324,7 @@
       savePrefs(); sync();
     } });
     function sync() {
+      const pd = getPad(); if (pd) pd.refresh();
       tools.forEach((b) => b.classList.toggle("on", b.dataset.tool === prefs.tool));
       colors.forEach((b) => b.classList.toggle("on", b.dataset.color === prefs.color && prefs.tool !== "eraser"));
       sizes.forEach((b) => b.classList.toggle("on", Number(b.dataset.size) === prefs.size));
@@ -332,9 +350,9 @@
     const mod = e.ctrlKey || e.metaKey;
     if (mod && e.key.toLowerCase() === "z") { e.preventDefault(); e.shiftKey ? p.redo() : p.undo(); }
     else if (mod && e.key.toLowerCase() === "y") { e.preventDefault(); p.redo(); }
-    else if (!mod && !e.altKey && { p: "pen", h: "hl", e: "eraser" }[e.key.toLowerCase()]) {
-      prefs.tool = { p: "pen", h: "hl", e: "eraser" }[e.key.toLowerCase()]; savePrefs(); activePad.bar.sync();
-    }
+    else if (!mod && !e.altKey && { p: "pen", h: "hl", e: "eraser", t: "tap" }[e.key.toLowerCase()]) {
+      prefs.tool = { p: "pen", h: "hl", e: "eraser", t: "tap" }[e.key.toLowerCase()]; savePrefs(); activePad.bar.sync();
+    } else if (e.key === "Escape" && activePad.off) activePad.off();
   });
   window.addEventListener("pagehide", () => activePad && activePad.pad.save());
 
@@ -349,37 +367,96 @@
   // 이름이 prefix 로 시작하는 필기를 모두 지움 (예: 새 시험을 시작할 때 "ink:t:")
   S.inkClear = function (prefix) {
     try { Object.keys(localStorage).filter((k) => k.startsWith(prefix)).forEach((k) => localStorage.removeItem(k)); } catch (e) { /* 무시 */ }
+    // 지금 화면의 필기도 지울 대상이면 새로 엶
+    if (page.key && page.key.startsWith(prefix) && page.pad) {
+      if (activePad && activePad.pad === page.pad) activePad = null;
+      page.pad.destroy(true); page.pad = null;
+      const k = page.key.slice("ink:p:".length); page.key = null;
+      S.inkPage.setKey(k);
+    }
   };
 
-  // ───────────────────────── 문제 위에 쓰기
-  //   카드 머리에 「✏️ 필기」 버튼. 켜면 카드 전체가 종이가 되고, 끄면 쓴 것은 남은 채 문제를 풀 수 있어요.
-  S.inkButton = function (card, key) {
-    card.classList.add("ink-host");
-    let pad = LS.get(key) ? Pad(card, key) : null;
-    let bar = null;
-    const b = el("button", { class: "ink-toggle", type: "button", title: "문제 위에 필기 (펜·마우스·손가락)" }, "✏️ 필기");
-    const off = () => {
-      if (!pad) return;
-      pad.setEnabled(false); pad.save();
-      if (bar) bar.remove();
-      bar = null; b.classList.remove("on"); b.textContent = "✏️ 필기";
-      card.classList.remove("inking");
-      if (activePad && activePad.pad === pad) activePad = null;
-    };
-    b.addEventListener("click", () => {
-      if (bar) return off();
-      if (!pad) pad = Pad(card, key);
-      bar = toolbar(() => pad, { onClose: off });
-      bar.classList.add("floating");
-      document.body.append(bar);
-      pad.setEnabled(true);
-      card.classList.add("inking");
-      b.classList.add("on"); b.textContent = "✏️ 필기 끄기";
-      activate(pad, bar);
-      activePad.off = off;
-      // 화면을 떠나면 저절로 끔
-      const watch = setInterval(() => { if (!document.body.contains(card)) { clearInterval(watch); off(); } else if (!bar) clearInterval(watch); }, 500);
-    });
+  // ───────────────────────── 화면 전체에 쓰기
+  //   ✏️ 를 켜면 문제·지문·옆 창까지 화면 전체가 종이가 돼요.
+  //   필기는 화면(문제)마다 따로 저절로 저장되고, 다음 문제로 넘기면 그 문제의 필기로 바뀌어요(필기 모드는 그대로).
+  //   app.js 가 화면이 바뀔 때마다 STORY.inkPage.setKey(이름) 을 불러 줌. 이름이 null 이면 필기 없는 화면.
+  const page = { host: null, pad: null, key: null, on: false, bar: null, fab: null };
+  const appEl = () => document.getElementById("app");
+  function pageHeight() {
+    const a = appEl();
+    const bottom = a ? a.getBoundingClientRect().bottom + window.scrollY : 0;
+    return Math.max(Math.ceil(bottom + 120), window.innerHeight);
+  }
+  function ensureHost() {
+    if (page.host) return;
+    page.host = el("div", { class: "ink-layer" });
+    document.body.append(page.host);
+    const fit = () => { page.host.style.height = pageHeight() + "px"; };
+    fit();
+    new ResizeObserver(fit).observe(appEl() || document.body);
+    window.addEventListener("resize", fit);
+  }
+  function makePagePad() {
+    ensureHost();
+    page.host.style.height = pageHeight() + "px";
+    page.pad = Pad(page.host, page.key, { center: true, passTap: true, height: () => page.host.clientHeight });
+    page.pad.setEnabled(page.on);
+    if (page.on) { activate(page.pad, page.bar); activePad.off = () => setOn(false); }
+  }
+  function dropPagePad() {
+    if (!page.pad) return;
+    if (activePad && activePad.pad === page.pad) activePad = null;
+    page.pad.destroy(); page.pad = null;
+  }
+  function paintFab() {
+    if (!page.fab) {
+      page.fab = el("button", { class: "ink-fab", type: "button", title: "화면에 필기하기 (펜·마우스·손가락)", "aria-label": "필기", onclick: () => setOn(true) }, "✏️");
+      document.body.append(page.fab);
+    }
+    page.fab.classList.toggle("hidden", !page.key || page.on);
+    document.querySelectorAll(".ink-toggle.page").forEach((b) => { b.classList.toggle("on", page.on); b.textContent = page.on ? "✏️ 필기 끄기" : "✏️ 필기"; });
+  }
+  function setOn(on) {
+    if (on === page.on) return;
+    page.on = on;
+    if (on) {
+      if (prefs.tool === "tap") { prefs.tool = "pen"; savePrefs(); }
+      page.bar = toolbar(() => page.pad, { onClose: () => setOn(false) });
+      page.bar.classList.add("floating");
+      document.body.append(page.bar);
+      document.body.classList.add("inking-page");
+      if (!page.pad && page.key) makePagePad();
+      else if (page.pad) { page.pad.setEnabled(true); activate(page.pad, page.bar); activePad.off = () => setOn(false); }
+    } else {
+      if (page.pad) { page.pad.setEnabled(false); page.pad.save(); if (page.pad.empty) dropPagePad(); }
+      if (page.bar) page.bar.remove();
+      page.bar = null;
+      document.body.classList.remove("inking-page");
+      if (activePad && activePad.bar && !document.body.contains(activePad.bar)) activePad = null;
+    }
+    paintFab();
+  }
+  S.inkPage = {
+    setKey(key) {
+      key = key ? "ink:p:" + key : null;
+      if (key === page.key) return;
+      dropPagePad();
+      page.key = key;
+      if (!key) { if (page.on) setOn(false); paintFab(); return; }
+      // 새 화면이 그려진 다음 크기를 재서 그 화면의 필기를 불러옴
+      requestAnimationFrame(() => {
+        if (page.key !== key || page.pad) return;
+        if (page.on || LS.get(key)) makePagePad();
+      });
+      paintFab();
+    },
+    get on() { return page.on; },
+    toggle() { setOn(!page.on); },
+  };
+  // 카드 머리에 붙는 「✏️ 필기」 버튼 — 화면 전체 필기를 켜고 끔
+  S.inkButton = function () {
+    const b = el("button", { class: "ink-toggle page" + (page.on ? " on" : ""), type: "button", title: "화면 전체에 필기 (펜·마우스·손가락)", onclick: () => setOn(!page.on) },
+      page.on ? "✏️ 필기 끄기" : "✏️ 필기");
     return b;
   };
 
@@ -414,6 +491,41 @@
     pad.setEnabled(true);
     activate(pad, bar);
     new ResizeObserver(setH).observe(body);
+  };
+
+  // ───────────────────────── 이모티콘 직접 그리기 → 128px 그림 (배경 투명)
+  S.drawEmoticon = function () {
+    return new Promise((done) => {
+      const KEY = "ink:emo:draft";
+      const box = el("div", { class: "ink-page emo-draw bg-grid" });
+      let pad = null;
+      const finish = (src) => { if (pad) pad.destroy(true); if (activePad && activePad.pad === pad) activePad = null; wrap.remove(); done(src); };
+      const add = el("button", { class: "btn", type: "button", onclick: () => {
+        if (!pad || pad.empty) return toast("먼저 그려 주세요.");
+        const big = new Image();
+        big.onload = () => {
+          const c = document.createElement("canvas"); c.width = c.height = 128;
+          c.getContext("2d").drawImage(big, 0, 0, 128, 128);
+          let out = c.toDataURL("image/webp", 0.9);
+          if (!out.startsWith("data:image/webp")) out = c.toDataURL("image/png");
+          LS.del(KEY);
+          finish(out);
+        };
+        big.src = pad.toPNG(null, true);
+      } }, "이 그림 넣기");
+      const bar = toolbar(() => pad);
+      const wrap = el("div", { class: "modal ink-modal" },
+        el("div", { class: "mbox", role: "dialog", "aria-label": "이모티콘 그리기" },
+          el("div", { class: "mhd" }, el("b", {}, "✏️ 이모티콘 그리기"), el("button", { class: "x", type: "button", "aria-label": "닫기", onclick: () => finish(null) }, "✕")),
+          el("div", { class: "mbd" }, bar, box,
+            el("p", { class: "muted small", text: "네모 칸 안에 크게 그려요. 굵은 펜이 잘 보여요. 배경은 투명하게 들어가요." }),
+            el("div", { class: "row" }, add))));
+      document.body.append(wrap);
+      pad = Pad(box, KEY, { logicalWidth: 320, height: () => box.clientHeight });
+      pad.setEnabled(true);
+      if (prefs.size < 3.5) { prefs.size = 3.5; savePrefs(); }
+      activate(pad, bar);
+    });
   };
 
   // ───────────────────────── 과목별 필기장  #/note/:sid

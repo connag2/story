@@ -3,7 +3,7 @@
 //  - 인터넷이 안 되면 저장해 둔 것으로 열어요.
 const CACHE = "story";
 const CORE = [
-  "./", "index.html", "css/style.css", "js/app.js", "js/sync.js", "js/shop.js", "js/comments.js", "js/ink.js",
+  "./", "index.html", "css/style.css", "js/app.js", "js/sync.js", "js/shop.js", "js/comments.js", "js/ink.js", "js/extras.js",
   "data/reading.js", "data/reading-mock-2026-09.js", "data/math.js", "data/english.js", "data/programming.js", "data/korean.js", "data/guides.js",
   "data/solutions-math-1.js", "data/solutions-math-2.js", "data/solutions-math-3.js", "data/solutions-reading.js", "data/solutions-programming.js", "data/solutions-korean.js",
   "vendor/katex/katex.min.css", "vendor/katex/katex.min.js", "vendor/katex/auto-render.min.js",

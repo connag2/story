@@ -91,7 +91,7 @@ export function POST(req) {
           const owned = new Set((await loadPoints(uid)).owned);
           for (const m of emos) if (!owned.has(m[1])) throw new HttpError(403, "가지고 있지 않은 이모티콘이 있어요.");
         }
-        if (text.replace(EMO, "").trim().length < 2 && !emos.length) throw new HttpError(400, "두 글자 이상 써 주세요.");
+        if (!text.replace(EMO, "").trim() && !emos.length) throw new HttpError(400, "내용을 써 주세요.");
         const last = data.items.filter((x) => x.uid === uid).reduce((m, x) => Math.max(m, x.t), 0);
         if (Date.now() - last < 10_000) throw new HttpError(429, "조금 뒤에 다시 올려 주세요. (10초)");
         const it = { id: randomBytes(6).toString("base64url"), key, kind, parent, text, name: rec.name, uid, t: Date.now(), likes: [], reports: [], status: "" };

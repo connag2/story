@@ -49,41 +49,90 @@
   };
 
   // ── 댓글 쓰기 칸에 붙는 고르기 창
+  //   맨 위 「최근」 줄 · 묶음 탭(그림으로) · 가진 게 없으면 무료/싼 이모티콘을 바로 받기
+  //   onPick(token, src, quick) — quick 이면 글이 비어 있을 때 바로 보냄
+  const RECENT = "emo-recent-v1", QUICKSEND = "emo-quicksend-v1";
+  const lsGet = (k, d) => { try { const v = JSON.parse(localStorage.getItem(k)); return v == null ? d : v; } catch (e) { return d; } };
+  const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* 무시 */ } };
   S.emoPicker = function (onPick) {
     const wrap = el("div", { class: "emo-picker hidden" });
-    const open = async () => {
-      wrap.classList.toggle("hidden");
-      if (wrap.classList.contains("hidden") || wrap.dataset.loaded) return;
-      wrap.dataset.loaded = "1";
+    const pick = (token, src) => {
+      lsSet(RECENT, [token, ...lsGet(RECENT, []).filter((t) => t !== token)].slice(0, 16));
+      onPick(token, src, lsGet(QUICKSEND, true));
+      paintRecent();
+    };
+    const recent = el("div", { class: "emo-grid emo-recent" });
+    function paintRecent() {
+      const owned = new Set(((S.points && S.points()) || {}).owned || []);
+      const list = lsGet(RECENT, []).filter((t) => owned.has(t.split(":")[1]));
+      recent.replaceChildren(...(list.length ? [el("span", { class: "muted small emo-lbl" }, "최근")] : []), ...list.map((token) => {
+        const [, id, i] = token.match(/\[\[emo:([^:]+):(\d+)\]\]/) || [];
+        const img = el("img", { alt: "" });
+        const b = el("button", { class: "emo-btn sm", type: "button", onclick: () => pick(token, img.src) }, img);
+        getPack(id).then((r) => { img.src = r.images[+i] || ""; }).catch(() => b.remove());
+        return b;
+      }));
+    }
+    const quickBox = el("input", { type: "checkbox" });
+    quickBox.checked = lsGet(QUICKSEND, true);
+    quickBox.addEventListener("change", () => lsSet(QUICKSEND, quickBox.checked));
+    const head = el("label", { class: "muted small emo-quick" }, quickBox, " 글이 비어 있으면 누르자마자 보내기");
+
+    async function load() {
       const pts = S.points && S.points();
       const owned = (pts && pts.owned) || [];
+      const list = await getList(true).catch(() => ({ packs: [] }));
       if (!owned.length) {
-        wrap.replaceChildren(el("p", { class: "muted small" }, "가진 이모티콘이 없어요. ", el("a", { href: "#/shop" }, "이모티콘 상점 가기 →")));
+        // 가진 게 없으면: 무료·싼 것부터 바로 받기
+        const cheap = list.packs.filter((p) => !p.hidden).sort((a, b) => a.price - b.price).slice(0, 8);
+        wrap.replaceChildren(el("p", { class: "muted small" }, `가진 이모티콘이 없어요. 🪙 ${pts ? pts.points : 0}포인트로 바로 받아 보세요 (문제 1개 맞히면 1포인트).`),
+          el("div", { class: "emo-offers" }, cheap.map((p) => {
+            const b = el("button", { class: "btn small", type: "button" }, p.price ? `🪙 ${p.price}` : "무료 받기");
+            b.addEventListener("click", async () => {
+              b.disabled = true;
+              try { const r = await post({ action: "buy", id: p.id }); S.setPoints(r.points); S.toast(`「${p.name}」을(를) 받았어요!`); wrap.dataset.loaded = ""; load(); }
+              catch (e) { S.toast(e.message); b.disabled = false; }
+            });
+            return el("div", { class: "emo-offer" }, el("img", { src: p.thumb, alt: "" }), el("b", { text: p.name }), b);
+          })),
+          el("a", { class: "link", href: "#/shop" }, "상점 전체 보기 · 직접 만들기 →"));
         return;
       }
-      const tabs = el("div", { class: "seg" });
+      const names = Object.fromEntries(list.packs.map((p) => [p.id, p]));
+      const tabs = el("div", { class: "emo-tabs" });
       const grid = el("div", { class: "emo-grid" });
-      wrap.replaceChildren(tabs, grid);
-      const list = await getList().catch(() => ({ packs: [] }));
-      const names = Object.fromEntries(list.packs.map((p) => [p.id, p.name]));
+      wrap.replaceChildren(head, recent, tabs, grid);
+      paintRecent();
       const show = async (id, btn) => {
-        tabs.querySelectorAll(".chip").forEach((c) => c.classList.remove("on")); btn.classList.add("on");
+        tabs.querySelectorAll("button").forEach((c) => c.classList.remove("on")); btn.classList.add("on");
+        lsSet("emo-lasttab-v1", id);
         grid.replaceChildren(el("span", { class: "muted small" }, "불러오는 중…"));
         try {
           const r = await getPack(id);
           grid.replaceChildren(...r.images.map((src, i) => el("button", { class: "emo-btn", type: "button", title: `${r.pack.name} ${i + 1}`,
-            onclick: () => onPick(`[[emo:${id}:${i}]]`, src) }, el("img", { src, alt: "" }))));
+            onclick: () => pick(`[[emo:${id}:${i}]]`, src) }, el("img", { src, alt: "" }))));
         } catch (e) { grid.replaceChildren(el("span", { class: "muted small" }, e.message)); }
       };
-      owned.forEach((id, k) => {
-        const b = el("button", { class: "chip", type: "button" }, names[id] || "이모티콘");
+      const last = lsGet("emo-lasttab-v1", null);
+      let first = null;
+      owned.forEach((id) => {
+        const p = names[id];
+        const b = el("button", { class: "emo-tab", type: "button", title: p ? p.name : "이모티콘" }, p ? el("img", { src: p.thumb, alt: "" }) : "😀");
         b.addEventListener("click", () => show(id, b));
         tabs.append(b);
-        if (k === 0) show(id, b);
+        if (!first || id === last) first = [id, b];
       });
+      tabs.append(el("a", { class: "emo-tab more", href: "#/shop", title: "더 받기" }, "＋"));
+      show(...first);
+    }
+    const toggle = () => {
+      wrap.classList.toggle("hidden");
+      if (wrap.classList.contains("hidden") || wrap.dataset.loaded) return;
+      wrap.dataset.loaded = "1";
+      load();
     };
     const btn = el("button", { class: "btn ghost small", type: "button", title: "이모티콘" }, "😀 이모티콘");
-    btn.addEventListener("click", () => { if (!S.isLoggedIn()) return S.openAccount(); open(); });
+    btn.addEventListener("click", () => { if (!S.isLoggedIn()) return S.openAccount(); toggle(); });
     return { button: btn, panel: wrap };
   };
 
@@ -196,14 +245,30 @@
     const paint = () => preview.replaceChildren(...images.map((src, i) => el("div", { class: "emo-slot" },
       el("img", { src, alt: "" }), el("button", { class: "x", type: "button", "aria-label": "빼기", onclick: () => { images.splice(i, 1); paint(); } }, "✕"))),
       images.length < 24 ? el("button", { class: "emo-add", type: "button", onclick: () => file.click() }, "+ 그림 추가") : null);
-    file.addEventListener("change", async () => {
+    file.addEventListener("change", async () => { await addFiles(file.files); file.value = ""; });
+    // 여러 방법으로 그림 넣기: 파일 고르기 · 끌어다 놓기 · 붙여넣기(Ctrl+V) · ✏️ 직접 그리기
+    async function addFiles(files) {
+      files = [...files].filter((f) => /^image\//.test(f.type)).slice(0, 24 - images.length);
+      if (!files.length) return;
       msg.textContent = "그림 줄이는 중…"; msg.className = "msg";
-      for (const f of [...file.files].slice(0, 24 - images.length)) {
+      for (const f of files) {
         try { images.push(await shrink(f)); } catch (e) { msg.textContent = e.message; msg.className = "msg err"; }
+        if (!name.value.trim() && f.name) name.value = f.name.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").slice(0, 20);
       }
-      file.value = ""; if (msg.textContent === "그림 줄이는 중…") msg.textContent = "";
+      if (msg.textContent === "그림 줄이는 중…") msg.textContent = "";
       paint();
-    });
+    }
+    const onPaste = (e) => {
+      if (!document.body.contains(preview)) return document.removeEventListener("paste", onPaste);
+      const files = [...(e.clipboardData && e.clipboardData.files) || []];
+      if (files.length) { e.preventDefault(); addFiles(files); }
+    };
+    document.addEventListener("paste", onPaste);
+    const draw = el("button", { class: "btn ghost small", type: "button", onclick: async () => {
+      if (!S.drawEmoticon) return;
+      const src = await S.drawEmoticon();
+      if (src && images.length < 24) { images.push(src); paint(); }
+    } }, "✏️ 직접 그리기");
     const btn = el("button", { class: "btn", type: "button" }, "올리고 팔기");
     btn.addEventListener("click", async () => {
       btn.disabled = true; msg.textContent = "올리는 중…"; msg.className = "msg";
@@ -216,9 +281,16 @@
       finally { btn.disabled = false; }
     });
     paint();
-    body.append(el("section", { class: "group make" },
-      el("p", { class: "muted small" }, "png · gif · webp · jpg 그림을 1~24개 올려요. 128px로 줄여서 올라가요(움직이는 GIF는 200KB 이하면 그대로). 남이 만든 그림을 허락 없이 올리면 안 돼요 — 신고되면 가려져요."),
-      el("div", { class: "form" }, name, desc, el("label", { class: "row" }, "가격 🪙", price, el("span", { class: "muted small" }, "0이면 무료")), file),
-      preview, msg, el("div", { class: "row" }, btn)));
+    const sec = el("section", { class: "group make" },
+      el("p", { class: "muted small" }, "그림을 ① 「+ 그림 추가」로 고르거나 ② 여기로 끌어다 놓거나 ③ 복사해서 Ctrl+V 로 붙여넣거나 ④ 「✏️ 직접 그리기」로 펜으로 그려요. 1~24개, 128px로 줄여서 올라가요(움직이는 GIF는 200KB 이하면 그대로). 남이 만든 그림을 허락 없이 올리면 안 돼요 — 신고되면 가려져요."),
+      el("div", { class: "row" }, draw),
+      preview,
+      el("div", { class: "form" }, name, desc, el("label", { class: "row" }, "가격 🪙", price,
+        ...[0, 5, 10, 30].map((v) => el("button", { class: "chip", type: "button", onclick: () => { price.value = v; } }, v ? String(v) : "무료"))), file),
+      msg, el("div", { class: "row" }, btn));
+    sec.addEventListener("dragover", (e) => { e.preventDefault(); sec.classList.add("drop"); });
+    sec.addEventListener("dragleave", () => sec.classList.remove("drop"));
+    sec.addEventListener("drop", (e) => { e.preventDefault(); sec.classList.remove("drop"); addFiles(e.dataTransfer.files); });
+    body.append(sec);
   }
 })();
