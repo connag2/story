@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>스토리 공부방</title>
+  <meta name="description" content="독서와 작문 · 미적분Ⅰ · 영어Ⅱ · 프로그래밍 문제를 풀고 바로 채점하는 공부방" />
+  <meta name="theme-color" content="#2f6bff" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📚</text></svg>" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="assets/icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="공부방" />
+  <link rel="stylesheet" href="vendor/katex/katex.min.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;700&display=swap" />
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <header class="top" id="top"></header>
+
+  <main id="app" class="container" aria-live="polite"></main>
+
+  <footer class="foot">진도와 채점 기록은 이 기기의 브라우저에 저장돼요.</footer>
+
+  <script defer src="vendor/katex/katex.min.js"></script>
+  <script defer src="vendor/katex/auto-render.min.js"></script>
+
+  <!-- 엔진 먼저, 그 다음 과목 데이터. 새 과목은 data/ 에 파일을 만들고 여기 한 줄 추가 -->
+  <script defer src="js/app.js"></script>
+  <script defer src="data/reading.js"></script>
+  <script defer src="data/reading-mock-2026-09.js"></script>
+  <script defer src="data/math.js"></script>
+  <script defer src="data/english.js"></script>
+  <script defer src="data/programming.js"></script>
+  <script defer src="data/korean.js"></script>
+  <script defer src="js/sync.js"></script>
+  <script>
+    if ("serviceWorker" in navigator && location.protocol !== "file:") {
+      addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
+    }
+  </script>
+</body>
+</html>
