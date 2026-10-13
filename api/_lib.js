@@ -1,7 +1,10 @@
 // 서버 공용 코드 (파일 이름이 _ 로 시작하면 Vercel에서 주소로 열리지 않음)
 //
-// 저장소: Vercel Blob (비공개). 프로젝트에 Blob 저장소를 연결하면 BLOB_READ_WRITE_TOKEN 이 자동으로 생겨요.
-// 토큰이 없으면(로컬 개발) 메모리에 저장합니다 — 서버를 끄면 사라져요.
+// 저장소 (먼저 있는 것을 써요)
+//  1) Upstash Redis — Vercel → Storage → Upstash for Redis 를 연결하면 KV_REST_API_URL/KV_REST_API_TOKEN
+//     (또는 UPSTASH_REDIS_REST_URL/UPSTASH_REDIS_REST_TOKEN) 이 생겨요. 무료로 한 달 50만 번이라 넉넉해요.
+//  2) Vercel Blob (비공개) — BLOB_READ_WRITE_TOKEN. 무료 한도가 작아서 예비용.
+//  3) 둘 다 없으면(로컬 개발) 메모리 — 서버를 끄면 사라져요.
 import { createHash, createHmac, randomBytes, scrypt, timingSafeEqual } from "node:crypto";
 
 const mem = new Map();
@@ -12,8 +15,48 @@ async function blobApi() {
   return blob;
 }
 
-// ── Blob 사용량 줄이기: 같은 서버 인스턴스 안에서 잠깐 기억해 두기
-//   readJson(path, ttl) — ttl(ms) 안에 다시 읽으면 Blob 에 가지 않음. 읽어서 고쳐 쓰는 곳(POST)은 ttl 없이 항상 새로 읽어요.
+// ── Upstash Redis (REST — 따로 설치할 것 없음)
+const REDIS_URL = () => process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL || "";
+const REDIS_TOKEN = () => process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN || "";
+export const storeKind = () => (REDIS_URL() && REDIS_TOKEN() ? "redis" : process.env.BLOB_READ_WRITE_TOKEN ? "blob" : "memory");
+async function redis(cmds) {                 // cmds: [["GET", k], ["SET", k, v]] → 결과 배열
+  const r = await fetch(REDIS_URL().replace(/\/$/, "") + "/pipeline", {
+    method: "POST", headers: { authorization: `Bearer ${REDIS_TOKEN()}`, "content-type": "application/json" }, body: JSON.stringify(cmds),
+  });
+  if (!r.ok) throw new Error(`redis ${r.status}: ${(await r.text().catch(() => "")).slice(0, 200)}`);
+  const out = await r.json();
+  return out.map((x) => { if (x.error) throw new Error("redis: " + x.error); return x.result; });
+}
+// 큰 값(이모티콘 그림 묶음)은 나눠서 저장: 본 키에는 "\u0000parts:N", 조각은 key#0 … key#N-1
+const PART = 900_000, MARK = "\u0000parts:";
+const K = (path) => "story:" + path;
+async function redisGet(path) {
+  const [v] = await redis([["GET", K(path)]]);
+  if (v == null || !String(v).startsWith(MARK)) return v;
+  const n = Number(String(v).slice(MARK.length));
+  const parts = await redis([["MGET", ...Array.from({ length: n }, (_, i) => `${K(path)}#${i}`)]]);
+  return parts[0].join("");
+}
+async function redisSet(path, body) {
+  if (body.length <= PART) return redis([["SET", K(path), body]]);
+  const n = Math.ceil(body.length / PART);
+  const cmds = Array.from({ length: n }, (_, i) => ["SET", `${K(path)}#${i}`, body.slice(i * PART, (i + 1) * PART)]);
+  for (let i = 0; i < cmds.length; i += 4) await redis(cmds.slice(i, i + 4));   // 한 번에 너무 크지 않게
+  return redis([["SET", K(path), MARK + n]]);
+}
+async function redisDel(paths) {
+  const heads = await redis(paths.map((p) => ["GET", K(p)]));
+  const keys = [];
+  paths.forEach((p, i) => {
+    keys.push(K(p));
+    const v = heads[i];
+    if (v != null && String(v).startsWith(MARK)) for (let j = 0; j < Number(String(v).slice(MARK.length)); j++) keys.push(`${K(p)}#${j}`);
+  });
+  if (keys.length) await redis([["DEL", ...keys]]);
+}
+
+// ── 같은 서버 인스턴스 안에서 잠깐 기억해 두기 (저장소 사용량 줄이기)
+//   readJson(path, ttl) — ttl(ms) 안에 다시 읽으면 저장소에 가지 않음. 읽어서 고쳐 쓰는 곳(POST)은 ttl 없이 항상 새로 읽어요.
 //   쓰기·지우기는 기억도 함께 고침.
 const memo = new Map();   // path → { text|null, exp }
 const MEMO_MAX = 500;
@@ -21,17 +64,21 @@ function remember(path, text, ttl) {
   if (memo.size >= MEMO_MAX) memo.delete(memo.keys().next().value);
   memo.set(path, { text, exp: Date.now() + ttl });
 }
+async function rawRead(path, immutable) {
+  const kind = storeKind();
+  if (kind === "redis") return redisGet(path);
+  if (kind === "memory") return mem.has(path) ? mem.get(path) : null;
+  const b = await blobApi();
+  // 바뀌지 않는 파일(이모티콘 그림)은 Blob 캐시를 써서 연산을 아낌
+  const r = await b.get(path, { access: "private", useCache: immutable });
+  return r && r.statusCode === 200 ? await new Response(r.stream).text() : null;
+}
 export async function readJson(path, ttl = 0, { immutable = false } = {}) {
   const m = ttl && memo.get(path);
   if (m && m.exp > Date.now()) return m.text == null ? null : JSON.parse(m.text);
-  const b = await blobApi();
-  let text = null;
-  if (!b) text = mem.has(path) ? mem.get(path) : null;
-  else {
-    // 바뀌지 않는 파일(이모티콘 그림)은 Blob 캐시를 써서 연산을 아낌
-    const r = await b.get(path, { access: "private", useCache: immutable });
-    text = r && r.statusCode === 200 ? await new Response(r.stream).text() : null;
-  }
+  let text;
+  try { text = await rawRead(path, immutable); }
+  catch (e) { console.error("store read", path, e); throw new HttpError(503, "저장소에 연결하지 못했어요. 잠시 뒤 다시 시도해 주세요. (관리자: 저장소 한도·연결을 확인하세요)"); }
   if (ttl) remember(path, text, ttl);
   return text == null ? null : JSON.parse(text);
 }
@@ -39,25 +86,52 @@ export async function readJson(path, ttl = 0, { immutable = false } = {}) {
 export async function writeJson(path, data) {
   const body = JSON.stringify(data);
   if (memo.has(path)) remember(path, body, 60_000);
-  const b = await blobApi();
-  if (!b) { mem.set(path, body); return; }
-  await b.put(path, body, {
-    access: "private", addRandomSuffix: false, allowOverwrite: true,
-    contentType: "application/json", cacheControlMaxAge: 60,
-  });
+  const kind = storeKind();
+  try {
+    if (kind === "redis") return void (await redisSet(path, body));
+    if (kind === "memory") { mem.set(path, body); return; }
+    const b = await blobApi();
+    await b.put(path, body, {
+      access: "private", addRandomSuffix: false, allowOverwrite: true,
+      contentType: "application/json", cacheControlMaxAge: 60,
+    });
+  } catch (e) { console.error("store write", path, e); throw new HttpError(503, "저장하지 못했어요. 잠시 뒤 다시 시도해 주세요. (관리자: 저장소 한도·연결을 확인하세요)"); }
 }
 
 export async function removeJson(paths) {
   paths.forEach((p) => memo.delete(p));
+  const kind = storeKind();
+  if (kind === "redis") return redisDel(paths);
+  if (kind === "memory") { paths.forEach((p) => mem.delete(p)); return; }
   const b = await blobApi();
-  if (!b) { paths.forEach((p) => mem.delete(p)); return; }
   await b.del(paths);
 }
 
-// ── 비밀 값: 토큰 서명용. AUTH_SECRET 을 따로 두는 것을 권장 (없으면 Blob 토큰을 사용)
+// ── Blob → Redis 옮기기 (관리자 · api/migrate.js): Blob 이 다시 열렸을 때 예전 계정·기록을 가져와요
+export async function copyBlobToRedis() {
+  if (storeKind() !== "redis") throw new HttpError(400, "먼저 Upstash Redis 를 연결해 주세요.");
+  const b = await blobApi();
+  if (!b) throw new HttpError(400, "Blob 저장소가 연결되어 있지 않아요.");
+  let cursor, copied = 0, skipped = 0;
+  do {
+    const page = await b.list({ cursor, limit: 1000 });
+    for (const it of page.blobs) {
+      const [have] = await redis([["EXISTS", K(it.pathname)]]);
+      if (have) { skipped++; continue; }                         // 이미 새로 만든 것은 덮어쓰지 않음
+      const r = await b.get(it.pathname, { access: "private", useCache: false });
+      if (!r || r.statusCode !== 200) continue;
+      await redisSet(it.pathname, await new Response(r.stream).text());
+      copied++;
+    }
+    cursor = page.hasMore ? page.cursor : null;
+  } while (cursor);
+  return { copied, skipped };
+}
+
+// ── 비밀 값: 토큰 서명용. AUTH_SECRET 을 따로 두는 것을 권장 (없으면 Blob → Redis 토큰을 사용)
 function secret() {
-  const s = process.env.AUTH_SECRET || process.env.BLOB_READ_WRITE_TOKEN || (process.env.VERCEL ? "" : "local-dev-secret");
-  if (!s) throw new HttpError(503, "서버 설정이 필요해요 (Blob 저장소 연결 또는 AUTH_SECRET).");
+  const s = process.env.AUTH_SECRET || process.env.BLOB_READ_WRITE_TOKEN || REDIS_TOKEN() || (process.env.VERCEL ? "" : "local-dev-secret");
+  if (!s) throw new HttpError(503, "서버 설정이 필요해요 (Upstash Redis 연결 또는 AUTH_SECRET).");
   return s;
 }
 

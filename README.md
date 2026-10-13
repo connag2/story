@@ -51,6 +51,15 @@
 - **백업 파일:** 로그인 없이도 기록을 파일로 내보내고 다른 기기에서 가져올 수 있어요.
 - **앱처럼 설치 + 자동 업데이트:** Vercel 주소를 휴대폰에서 열고 "홈 화면에 추가"하면 앱처럼 열려요. 인터넷이 되면 열 때마다 최신 내용을 받아 오고, 안 되면 저장해 둔 것으로 열려요.
 
+## 저장소: Upstash Redis (권장)
+
+Vercel Blob 무료 한도는 금방 차서(한도를 넘으면 저장소가 멈춰 로그인이 안 돼요) **Upstash Redis** 를 먼저 써요.
+1. Vercel 프로젝트 → **Storage → Create Database → Upstash (Redis)** → 무료(Free) 플랜 → 이 프로젝트에 **Connect**.
+   (`KV_REST_API_URL`, `KV_REST_API_TOKEN` 이 자동으로 생겨요. `UPSTASH_REDIS_REST_URL/TOKEN` 이름도 돼요.)
+2. 다시 배포하면 자동으로 Redis 를 써요. Blob 은 연결돼 있어도 Redis 가 있으면 안 써요.
+3. Blob 이 다시 열리면(다음 달 또는 요금제 변경) 관리자가 게시판의 「🛡 관리자 → 📦 예전 Blob 기록 가져오기」로 예전 계정·기록을 옮겨요.
+- 학습 기록은 각 기기에도 저장돼 있어서, 다시 가입·로그인하면 그 기기의 기록이 그대로 올라가요.
+
 ## Vercel에 올리기 (로그인까지)
 
 1. https://vercel.com/new 에서 **Import Git Repository → `connag2/story`** 선택 → 설정은 그대로 두고 **Deploy**.
