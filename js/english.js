@@ -51,15 +51,82 @@
     return null;
   }
 
-  // ── 🔊 읽어 주기 (브라우저 음성)
-  function speak(text, rate) {
-    if (!window.speechSynthesis) { if (S.toast) S.toast("이 브라우저는 읽어 주기를 지원하지 않아요."); return; }
+  // ── 🔊 목소리 (브라우저 음성)
+  //   스타일: 🎀 귀엽게(높은 톤 · 밝은 목소리 먼저) / 보통 / 차분하게
+  //   읽기: 영어만 / 영어 → 한국어 / 한국어만,  영어·한국어 목소리는 기기에 있는 것 중에서 고를 수 있어요
+  const VOICE = "eng-voice-v1";
+  const vpref = () => Object.assign({ style: "cute", read: "en-ko", en: "", ko: "" }, read(VOICE, {}));
+  const setV = (patch) => write(VOICE, Object.assign(vpref(), patch));
+  const STYLES = { cute: { pitch: 1.55, rate: 1.02 }, normal: { pitch: 1, rate: 1 }, calm: { pitch: 0.85, rate: 0.92 } };
+  // 기기마다 목소리 이름이 달라요: 아이폰·맥(Samantha, Junior, Yuna), 윈도우(Ana=어린이, Jenny, Aria, SunHi), 안드로이드·크롬(Google …)
+  //   앞에 있을수록 먼저 골라요
+  const CUTE = {
+    en: ["Junior", "Ana", "Jenny", "Aria", "Ava", "Samantha", "Allison", "Nicky", "Karen", "Tessa", "Google US English", "Zira", "Female"],
+    ko: ["Yuna", "Sora", "SunHi", "Heami", "Seoyeon", "Jimin", "Google 한국", "Female", "여성"],
+  };
+  const nameRe = (n) => new RegExp(`(^|[^A-Za-z])${n}(?![A-Za-z])`, "i");   // "Ana" 는 맞지만 "Diana" 는 아님
+  const isCute = (lang, name) => CUTE[lang].some((n) => nameRe(n).test(name));
+  let voices = [];
+  const loadVoices = () => { voices = window.speechSynthesis ? speechSynthesis.getVoices() : []; return voices; };
+  if (window.speechSynthesis) { loadVoices(); try { speechSynthesis.addEventListener("voiceschanged", loadVoices); } catch (e) { speechSynthesis.onvoiceschanged = loadVoices; } }
+  const voicesOf = (lang) => loadVoices().filter((v) => (lang === "en" ? /^en/i : /^ko/i).test(v.lang));
+  function voiceFor(lang) {
+    const vp = vpref(), list = voicesOf(lang);
+    if (vp[lang]) { const v = list.find((x) => x.name === vp[lang]); if (v) return v; }
+    if (vp.style === "cute") for (const n of CUTE[lang]) { const v = list.find((x) => nameRe(n).test(x.name)); if (v) return v; }
+    return (lang === "en" && list.find((x) => /^en(-|_)US/i.test(x.lang))) || list[0] || null;
+  }
+  // 한 마디 읽기 → 끝나면 Promise 가 풀려요
+  function say(text, lang, { rate, onboundary } = {}) {
+    return new Promise((done) => {
+      if (!window.speechSynthesis || !text) return done();
+      const st = STYLES[vpref().style] || STYLES.normal;
+      const u = new SpeechSynthesisUtterance(text);
+      u.lang = lang === "ko" ? "ko-KR" : "en-US";
+      const v = voiceFor(lang); if (v) u.voice = v;
+      u.pitch = st.pitch;
+      u.rate = Math.min(2, (rate || read(PREF, {}).rate || 0.9) * st.rate * (lang === "ko" ? 1.12 : 1));
+      if (onboundary) u.onboundary = onboundary;
+      u.onend = u.onerror = () => done();
+      speechSynthesis.speak(u);
+    });
+  }
+  function speak(text, rate, lang = "en") {
+    if (!window.speechSynthesis) { if (S.toast) S.toast("이 브라우저는 읽어 주기를 지원하지 않아요."); return Promise.resolve(); }
     speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(text);
-    u.lang = "en-US"; u.rate = rate || read(PREF, {}).rate || 0.9;
-    const v = speechSynthesis.getVoices().find((x) => /^en(-|_)US/i.test(x.lang)) || speechSynthesis.getVoices().find((x) => /^en/i.test(x.lang));
-    if (v) u.voice = v;
-    speechSynthesis.speak(u);
+    return say(text, lang, { rate });
+  }
+  // 영어 + 뜻 이어서
+  async function speakPair(en, ko, rate) { await speak(en, rate, "en"); if (ko && vpref().read !== "en") await say(ko, "ko", { rate }); }
+
+  // 목소리 설정 칸 (본문 해설 화면의 ⚙️ 보기 설정 안)
+  function voicePanel() {
+    const wrap = el("div", { class: "eng-voice" });
+    const paint = () => {
+      const vp = vpref();
+      const seg = (label, key, vals) => el("div", { class: "seg" }, el("b", {}, label), vals.map(([v, t]) =>
+        el("button", { class: "chip" + (vp[key] === v ? " on" : ""), type: "button", onclick: () => { setV({ [key]: v }); paint(); if (key === "style") preview(); } }, t)));
+      const pick = (lang, label) => {
+        const list = voicesOf(lang);
+        const sel = el("select", { "aria-label": label, onchange: () => { setV({ [lang]: sel.value }); preview(lang); } },
+          el("option", { value: "" }, `자동 (${vp.style === "cute" ? "귀여운 목소리 먼저" : "기본"})`),
+          list.map((v) => el("option", { value: v.name, ...(vp[lang] === v.name ? { selected: true } : {}) }, `${v.name}${isCute(lang, v.name) ? " 🎀" : ""}`)));
+        return el("label", { class: "row small" }, el("b", {}, label), sel, list.length ? null : el("span", { class: "muted small" }, lang === "ko" ? "이 기기에 한국어 목소리가 없어요" : "목소리를 불러오는 중…"));
+      };
+      wrap.replaceChildren(
+        seg("목소리", "style", [["cute", "🎀 귀엽게"], ["normal", "보통"], ["calm", "차분하게"]]),
+        seg("읽기", "read", [["en", "영어만"], ["en-ko", "영어 → 한국어"], ["ko", "한국어만"]]),
+        pick("en", "영어 목소리"), pick("ko", "한국어 목소리"),
+        el("div", { class: "row" }, el("button", { class: "btn ghost small", type: "button", onclick: () => preview() }, "🔊 미리 듣기")));
+    };
+    const preview = async (lang) => {
+      const vp = vpref();
+      if (lang !== "ko" && vp.read !== "ko") await speak("Hi! Let's read this passage together.", 0.95, "en");
+      if (lang !== "en" && vp.read !== "en") { if (lang === "ko") speechSynthesis.cancel(); await say("안녕! 같이 읽어 볼까요?", "ko", { rate: 0.95 }); }
+    };
+    paint();
+    if (window.speechSynthesis && !voicesOf("en").length) setTimeout(paint, 800);
+    return wrap;
   }
 
   // ── 단어 뜻 말풍선
@@ -69,7 +136,8 @@
     const hit = lookup(m, word);
     pop = el("div", { class: "eng-pop", role: "dialog" },
       el("b", { text: hit ? hit[0] : word }), " ",
-      el("button", { class: "link", type: "button", "aria-label": "읽어 주기", onclick: () => speak(hit ? hit[0] : word, 0.8) }, "🔊"),
+      el("button", { class: "link", type: "button", "aria-label": "단어 읽어 주기", onclick: () => speak(hit ? hit[0] : word, 0.8) }, "🔊"),
+      hit ? el("button", { class: "link", type: "button", "aria-label": "뜻 읽어 주기", onclick: () => speak(hit[1], 0.95, "ko") }, "🔊뜻") : null,
       el("div", { text: hit ? hit[1] : "단어장에 없어요. 끊어 읽기의 뜻을 참고하세요." }));
     document.body.append(pop);
     const r = target.getBoundingClientRect();
@@ -224,24 +292,30 @@
         toggle("끊어 읽기", "chunk", [[true, "켜기"], [false, "끄기"]]),
         toggle("어법 설명", "gram", [[true, "보이기"], [false, "숨기기"]]),
         toggle("집중", "focus", [[true, "지금 문장만 또렷하게"], [false, "모두 같게"]], () => listEl.classList.toggle("focus-mode", pref.focus)),
-        toggle("문장", "watch", [[false, "전부"], [true, "⚠️ 꼭 볼 문장만"]])));
+        toggle("문장", "watch", [[false, "전부"], [true, "⚠️ 꼭 볼 문장만"]]),
+        voicePanel()));
 
       // ── 위에 붙는 읽기 막대: 몇 번째 문장 · 이전/다음 · 자동 읽기
       const pos = el("b", { class: "eng-pos" });
       const autoBtn = el("button", { class: "btn small", type: "button", onclick: () => (auto ? stop() : start()) });
       const soundBtn = el("button", { class: "chip", type: "button", onclick: () => { pref.sound = !pref.sound; savePref(); paintBar(); if (auto) { stop(); start(); } } });
+      const koBtn = el("button", { class: "chip", type: "button", onclick: () => { const r = vpref().read; setV({ read: r === "en" ? "en-ko" : "en" }); paintBar(); } });
       const speedSel = el("select", { "aria-label": "빠르기", onchange: () => { pref.rate = Number(speedSel.value); savePref(); } },
         [[0.7, "느리게"], [0.9, "보통"], [1.05, "빠르게"], [1.2, "아주 빠르게"]].map(([v, t]) => el("option", { value: String(v), ...(pref.rate === v ? { selected: true } : {}) }, t)));
       const bar = el("div", { class: "eng-bar" },
         el("button", { class: "ib ghost icon", type: "button", title: "이전 문장 (↑)", onclick: () => focus(cur - 1, true) }, "▲"),
         pos,
         el("button", { class: "ib ghost icon", type: "button", title: "다음 문장 (↓)", onclick: () => focus(cur + 1, true) }, "▼"),
-        autoBtn, soundBtn, speedSel);
+        autoBtn, soundBtn, koBtn, speedSel);
       function paintBar() {
         pos.textContent = `${cur + 1} / ${lines.length}`;
         autoBtn.textContent = auto ? "⏸ 멈춤" : "▶ 자동 읽기";
         autoBtn.title = "스페이스바로도 켜고 꺼요. 한 문장씩 읽고 알아서 다음 문장으로 내려가요.";
         soundBtn.textContent = pref.sound ? "🔊 소리" : "🔇 조용히";
+        const r = vpref().read;
+        koBtn.textContent = r === "en" ? "🇺🇸" : r === "ko" ? "🇰🇷" : "🇺🇸→🇰🇷";
+        koBtn.title = r === "en" ? "영어만 읽어요 (누르면 한국어 해석도)" : r === "ko" ? "한국어만 읽어요" : "영어 다음에 한국어 해석도 읽어요 (누르면 영어만)";
+        koBtn.classList.toggle("on", r !== "en");
         soundBtn.title = pref.sound ? "소리 내어 읽어 줘요" : "소리 없이 읽는 속도에 맞춰 내려가요";
       }
       out.push(bar);
@@ -257,7 +331,8 @@
         const ln = (n.lines || [])[i] || {};
         const f = flags[i];
         const ko = cleanKo(l.ko);
-        const koEl = el("p", { class: "eng-ko" + (pref.ko === "tap" ? " veil" : ""), onclick: (e) => e.currentTarget.classList.remove("veil") }, ko);
+        const koEl = el("p", { class: "eng-ko" + (pref.ko === "tap" ? " veil" : ""), onclick: (e) => e.currentTarget.classList.remove("veil") }, ko,
+          el("button", { class: "ko-say", type: "button", title: "해석 읽어 주기", onclick: (e) => { e.stopPropagation(); stop(); koEl.classList.remove("veil"); speak(ko, pref.rate, "ko"); } }, "🔊"));
         const gram = [];
         (l.c || []).forEach((c) => gram.push(el("li", {}, el("span", { class: "chip" }, c.tag || "어법"), " ",
           el("b", { text: c.o[c.a] }), c.o.length > 1 ? el("span", { class: "muted", text: ` (✕ ${c.o.filter((_, k) => k !== c.a).join(" / ")})` }) : null, " ", c.why || "")));
@@ -270,7 +345,7 @@
             el("button", { class: "ink-toggle", type: "button", title: "이 문장 읽어 주기", onclick: () => { stop(); focus(i, false); speakLine(i); } }, "🔊")),
           f.length ? el("p", { class: "eng-why" }, f.filter((x) => x.k !== "gram1").map((x) => x.why).join(" ")) : null,
           el("p", { class: "eng-en big" }, sentenceEl(l, m)),
-          pref.chunk && ln.chunks ? el("div", { class: "eng-chunks" }, ln.chunks.map(([en, k], j) => [j ? el("span", { class: "slash" }, "/") : null, el("span", { class: "eng-chunk" }, el("span", { class: "c-en", text: en }), el("span", { class: "c-ko", text: k }))]).flat()) : null,
+          pref.chunk && ln.chunks ? el("div", { class: "eng-chunks" }, ln.chunks.map(([en, k], j) => [j ? el("span", { class: "slash" }, "/") : null, el("span", { class: "eng-chunk", title: "누르면 영어와 뜻을 읽어 줘요", onclick: () => { stop(); speakPair(en, k, pref.rate); } }, el("span", { class: "c-en", text: en }), el("span", { class: "c-ko", text: k }))]).flat()) : null,
           pref.ko !== "hide" ? koEl : null,
           ln.tip ? el("p", { class: "eng-tip" }, "💡 ", ln.tip) : null,
           ln.words && ln.words.length ? el("div", { class: "eng-words" }, ln.words.map(([w, k]) => el("span", { class: "eng-word" }, el("b", { text: w }), " ", k))) : null,
@@ -296,23 +371,28 @@
         paintBar();
         if (scroll && cards[i]) cards[i].scrollIntoView({ behavior: quiet ? "auto" : "smooth", block: "center" });
       }
-      function speakLine(i, done) {
+      // 한 문장: 영어(읽는 단어를 따라 노란색) → 한국어 해석(초록 칸이 반짝)
+      async function speakLine(i, done) {
         if (!window.speechSynthesis) { if (done) done(); return; }
         speechSynthesis.cancel();
-        const ut = new SpeechSynthesisUtterance(full[i]);
-        ut.lang = "en-US"; ut.rate = pref.rate;
-        const v = speechSynthesis.getVoices().find((x) => /^en(-|_)US/i.test(x.lang)) || speechSynthesis.getVoices().find((x) => /^en/i.test(x.lang));
-        if (v) ut.voice = v;
+        const my = token, vp = vpref();
         const ws = [...cards[i].querySelectorAll(".eng-en.big .w")];
-        ut.onboundary = (e) => {   // 읽는 단어를 따라 표시
-          let hit = null;
-          for (const w of ws) { if (+w.dataset.o <= e.charIndex) hit = w; else break; }
-          ws.forEach((w) => w.classList.toggle("speaking", w === hit));
-        };
-        const my = token;
-        ut.onend = () => { ws.forEach((w) => w.classList.remove("speaking")); if (done && my === token) done(); };
-        ut.onerror = ut.onend;
-        speechSynthesis.speak(ut);
+        if (vp.read !== "ko") {
+          await say(full[i], "en", { rate: pref.rate, onboundary: (e) => {
+            let hit = null;
+            for (const w of ws) { if (+w.dataset.o <= e.charIndex) hit = w; else break; }
+            ws.forEach((w) => w.classList.toggle("speaking", w === hit));
+          } });
+          ws.forEach((w) => w.classList.remove("speaking"));
+        }
+        if (my !== token) return;
+        if (vp.read !== "en") {
+          const koEl = cards[i].querySelector(".eng-ko");
+          if (koEl) { koEl.classList.remove("veil"); koEl.classList.add("speaking-ko"); }
+          await say(cleanKo(lines[i].ko), "ko", { rate: pref.rate });
+          if (koEl) koEl.classList.remove("speaking-ko");
+        }
+        if (my === token && done) done();
       }
       function step() {
         if (!auto) return;

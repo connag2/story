@@ -591,3 +591,12 @@ button.tcell { font: inherit; color: inherit; cursor: pointer; }
 .eng-legend { margin-top: 8px; }
 @media (max-width: 520px) { .eng-en.big { font-size: 18px; } }
 @media (max-width: 520px) { .eng-bar { flex-wrap: nowrap; gap: 4px; padding: 4px 6px; } .eng-bar .ib.icon { min-width: 34px; height: 34px; padding: 0; } .eng-bar .eng-pos { min-width: 44px; } .eng-bar select { max-width: 76px; padding: 6px 4px; } .eng-bar .chip { padding: 4px 8px; } }
+/* 목소리 · 한국어 읽기 */
+.eng-voice { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--rule); }
+.eng-voice select { font: inherit; padding: 5px 8px; border-radius: 10px; border: 1px solid var(--rule); background: var(--sheet); color: var(--ink); max-width: 260px; }
+.eng-ko { position: relative; padding-right: 40px !important; }
+.eng-ko .ko-say { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); border: 0; background: none; font-size: 16px; cursor: pointer; opacity: .7; }
+.eng-ko.veil .ko-say { visibility: hidden; }
+.eng-ko.speaking-ko { box-shadow: 0 0 0 3px #ffe066 inset; background: #fff8d6; color: #1b2433; }
+.eng-chunk { cursor: pointer; }
+.eng-chunk:hover { border-color: var(--blue); }
