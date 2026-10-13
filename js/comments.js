@@ -42,7 +42,22 @@
     if (s < 86400 * 30) return `${Math.floor(s / 86400)}일 전`;
     return new Date(t).toLocaleDateString("ko-KR");
   };
-  const get = (key) => S.api("comments" + (key ? "?key=" + encodeURIComponent(key) : ""));
+  // 목록은 로그인 정보 없이 받아서(CDN 이 30초 기억 → 저장소 아끼기) 내 글·👍·신고 여부는 여기서 계산.
+  //   fresh: 내가 방금 글을 쓰거나 고친 뒤 → 기억된 것 말고 새로 받기. 관리자는 신고 수 때문에 로그인해서 받음.
+  const REPORTED = "cm-reported-v1";
+  const myReports = () => { try { return JSON.parse(localStorage.getItem(REPORTED)) || []; } catch (e) { return []; } };
+  const addReport = (id) => { try { localStorage.setItem(REPORTED, JSON.stringify([...new Set([...myReports(), id])].slice(-500))); } catch (e) { /* 무시 */ } };
+  const get = async (key, fresh) => {
+    const admin = S.isAdmin && S.isAdmin();
+    const q = [key ? "key=" + encodeURIComponent(key) : "", fresh ? "_=" + Date.now() : ""].filter(Boolean).join("&");
+    const r = await S.api("comments" + (q ? "?" + q : ""), { public: !admin });
+    if (!admin) {
+      const me = S.myUid && S.myUid(), rep = new Set(myReports());
+      r.items = r.items.map((it) => ({ ...it, mine: !!me && it.u === me, liked: !!me && (it.likers || []).includes(me),
+        canDelete: !it.deleted && !!me && it.u === me, reported: rep.has(it.id) }));
+    }
+    return r;
+  };
   const post = (b) => S.api("comments", { method: "POST", body: JSON.stringify(b) });
   const rich = (text) => (S.renderRich ? S.renderRich(text) : document.createTextNode(text));
 
@@ -99,7 +114,7 @@
       } }, "지우기"));
       if (!it.mine && S.isLoggedIn()) {
         tools.append(el("button", { class: "link", type: "button", disabled: it.reported, onclick: () => {
-          if (confirm("이 글을 신고할까요? (욕설·도배·광고·개인정보 등) 3명이 신고하면 가려져요.")) act({ action: "report", id: it.id });
+          if (confirm("이 글을 신고할까요? (욕설·도배·광고·개인정보 등) 3명이 신고하면 가려져요.")) act({ action: "report", id: it.id }, () => { addReport(it.id); ctx.reload(); });
         } }, it.reported ? "신고함" : "🚨 신고"));
         tools.append(el("button", { class: "link", type: "button", onclick: () => {
           if (!confirm(`${it.name} 님을 차단할까요? 이 사람의 글이 내 화면에서 가려져요.`)) return;
@@ -225,14 +240,14 @@
         el("a", { class: "link", href: "#/board" }, "전체 게시판 →")),
       el("p", { class: "muted small", text: "이 페이지에 대한 의견, 나만의 공부법, 추가했으면 하는 내용을 남겨 주세요. 모두 함께 봐요." }));
     let ids = new Set(), fresh = null;
-    async function load() {
+    async function load(force) {
       try {
-        const r = await get(key);
+        const r = await get(key, force);
         ids = new Set(r.items.map((x) => x.id));
         if (fresh) fresh.hide();
         const th = threads(r.items);
         count.textContent = `${th.length}개`;
-        const ctx = { admin: r.admin, key, reload: load };
+        const ctx = { admin: r.admin, key, reload: () => load(true) };
         listEl.replaceChildren(...(th.length ? th.map((t) => itemEl(t.it, { ...ctx, replies: t.replies })) :
           [el("p", { class: "muted small", text: "아직 글이 없어요. 첫 글을 남겨 보세요!" })]));
       } catch (e) {
@@ -245,9 +260,14 @@
       S.serverReady().then((ok) => {
         if (!ok) return;
         box.classList.remove("hidden");
-        fresh = watchNew(listEl, key, () => ids, load);
-        box.append(composer(key, load), fresh, listEl);
-        load();
+        fresh = watchNew(listEl, key, () => ids, () => load(true));
+        box.append(composer(key, () => load(true)), fresh, listEl);
+        // 화면에 보일 때 처음 불러옴 (아래까지 안 내리면 서버에 묻지 않음)
+        listEl.replaceChildren(el("p", { class: "muted small", text: "댓글 불러오는 중…" }));
+        if ("IntersectionObserver" in window) {
+          const io = new IntersectionObserver((es) => { if (es.some((e) => e.isIntersecting)) { io.disconnect(); load(); } }, { rootMargin: "200px" });
+          io.observe(box);
+        } else load();
       });
     }
     return box;
@@ -276,12 +296,12 @@
       const th = threads(all).filter(({ it }) => (!filter.kind || it.kind === filter.kind) &&
         (!filter.status || (filter.status === "open" ? it.status !== "done" : filter.status === "reported" ? (it.reports || it.hidden) : it.status === filter.status)));
       info.textContent = `${th.length}개`;
-      listEl.replaceChildren(...(th.length ? th.map((t) => itemEl(t.it, { admin, reload: load, showPlace: true, replies: t.replies }))
+      listEl.replaceChildren(...(th.length ? th.map((t) => itemEl(t.it, { admin, reload: () => load(true), showPlace: true, replies: t.replies }))
         : [el("p", { class: "muted", text: "해당하는 글이 없어요." })]));
     }
-    async function load() {
+    async function load(force) {
       try {
-        const r = await get(""); all = r.items; admin = r.admin; fresh.hide(); paint();
+        const r = await get("", force); all = r.items; admin = r.admin; fresh.hide(); paint();
         if (admin && !adminBox.firstChild) adminPanel();
       } catch (e) { listEl.replaceChildren(el("p", { class: "muted", text: e.message })); }
     }
@@ -317,13 +337,13 @@
 
     app.append(el("section", { class: "group" },
       el("div", { class: "cm-title" }, el("b", {}, "공부방 전체에 글 남기기")),
-      composer("general", load)));
+      composer("general", () => load(true))));
     app.append(chips("종류", "kind", [["", "전체"], ...Object.entries(KINDS).map(([k, v]) => [k, v.label])]));
     app.append(chips("상태", "status", [["", "전체"], ["open", "아직 반영 전"], ["planned", "반영 예정"], ["done", "반영 완료"], ["reported", "🚨 신고됨"]]));
     app.append(adminBox);
     app.append(el("div", { class: "row" }, info, copyBtn,
       blocked().length ? el("span", { class: "muted small" }, `🚫 차단 ${blocked().length}명`) : null));
-    const fresh = watchNew(listEl, "", () => new Set(all.map((x) => x.id)), load);
+    const fresh = watchNew(listEl, "", () => new Set(all.map((x) => x.id)), () => load(true));
     app.append(fresh, listEl);
     load();
   };

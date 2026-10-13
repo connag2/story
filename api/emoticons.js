@@ -23,7 +23,7 @@ const isHidden = (p) => p.adminHidden === true || (p.adminHidden !== false && (p
 function meta(p, me, owned, admin) {
   return {
     id: p.id, name: p.name, desc: p.desc, price: p.price, author: p.author, count: p.count, sales: p.sales || 0,
-    t: p.t, thumb: p.thumb, hidden: isHidden(p),
+    t: p.t, thumb: p.thumb, hidden: isHidden(p), au: p.authorUid,
     owned: owned.includes(p.id), mine: !!me && p.authorUid === me,
     ...(admin ? { reports: (p.reports || []).length } : {}),
   };
@@ -44,20 +44,24 @@ export function GET(req) {
       if (isHidden(p) && !owned.includes(id) && p.authorUid !== me && !admin) throw new HttpError(404, "신고로 가려진 이모티콘이에요.");
       // 그림 묶음은 한 번 올리면 바뀌지 않아요 → 서버도 브라우저도 오래 기억
       const data = await readJson(packPath(id), 86_400_000, { immutable: true });
-      return json({ pack: meta(p, me, owned, admin), images: (data && data.images) || [] }, 200, "private, max-age=604800");
+      // 로그인 없이 받은 것(가려지지 않은 묶음)은 Vercel CDN 이 1년 기억 → 저장소를 다시 안 읽음
+      return json({ pack: meta(p, me, owned, admin), images: (data && data.images) || [] }, 200,
+        tok ? "private, max-age=604800" : "public, max-age=604800, s-maxage=31536000, immutable");
     }
     const packs = idx.packs
       .filter((p) => !isHidden(p) || admin || p.authorUid === me || owned.includes(p.id))
       .sort((a, b) => (b.sales || 0) - (a.sales || 0) || b.t - a.t)
       .map((p) => meta(p, me, owned, admin));
-    return json({ packs, me: me ? { admin } : null });
+    // 로그인 없이 받은 목록은 CDN 이 1분 기억 (가진 것·내 것 표시는 브라우저가 계산)
+    return tok ? json({ packs, me: { admin } }, 200, "private, no-store")
+      : json({ packs, me: null }, 200, "public, max-age=0, must-revalidate", "max-age=60, stale-while-revalidate=600");
   });
 }
 
 export function POST(req) {
   return handle(async () => {
     const b = await body(req, 6_000_000);
-    const { id: uid, rec } = await authUser(req);
+    const { id: uid, rec } = await authUser(req, { verify: true });
     const admin = isAdmin(rec.name);
     const idx = await loadIndex();
     const find = () => {

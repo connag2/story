@@ -27,7 +27,7 @@ const isHidden = (it) => it.adminHidden === true || (it.adminHidden !== false &&
 function view(it, uid, admin) {
   const hidden = isHidden(it);
   return {
-    id: it.id, key: it.key, kind: it.kind, parent: it.parent || null,
+    id: it.id, key: it.key, kind: it.kind, parent: it.parent || null, u: it.deleted ? "" : it.uid, likers: it.likes || [],
     text: it.deleted ? "" : hidden && !admin && it.uid !== uid ? "" : it.text,
     name: it.deleted ? "" : it.name, t: it.t, status: it.status || "",
     deleted: !!it.deleted, hidden,
@@ -43,16 +43,19 @@ function whoMaybe(req) {
   try { return readToken(req); } catch (e) { return null; }
 }
 
+//   로그인 없이(Authorization 없이) 부르면 모두에게 같은 목록 → Vercel CDN 이 30초 기억해서 저장소를 거의 안 읽어요.
+//   "내 글인지 · 내가 👍 했는지"는 브라우저가 u(글쓴이) · likers 로 계산. 관리자는 로그인해서 불러 신고 수까지 봐요.
 export function GET(req) {
   return handle(async () => {
     const key = new URL(req.url).searchParams.get("key");
     const me = whoMaybe(req);
     const admin = !!me && isAdmin(me.n);
-    const { items } = await load(15_000);            // 읽기만 할 때는 15초 기억 (Blob 연산 아끼기)
+    const { items } = await load(15_000);            // 읽기만 할 때는 15초 기억
     const list = (key ? items.filter((it) => it.key === key) : items)
       .slice().sort((a, b) => b.t - a.t).slice(0, 400)
       .map((it) => view(it, me && me.u, admin));
-    return json({ items: list, admin }, 200, "private, max-age=10");
+    return me ? json({ items: list, admin }, 200, "private, no-store")
+      : json({ items: list, admin }, 200, "public, max-age=0, must-revalidate", "max-age=30, stale-while-revalidate=300");
   });
 }
 
