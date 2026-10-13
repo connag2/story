@@ -26,12 +26,31 @@
 
   // ── 이모티콘 그림 캐시 (묶음 단위로 한 번만 받아 옴)
   const packCache = new Map();   // id → Promise<{ pack, images }>
+  //   그림은 로그인 정보 없이 받아요 → CDN 이 기억 (가려진 묶음은 가진 사람만 로그인해서 다시 받음)
   function getPack(id) {
-    if (!packCache.has(id)) packCache.set(id, api("emoticons?id=" + encodeURIComponent(id)).catch((e) => { packCache.delete(id); throw e; }));
+    const path = "emoticons?id=" + encodeURIComponent(id);
+    if (!packCache.has(id)) packCache.set(id, api(path, { public: true }).catch(() => api(path)).catch((e) => { packCache.delete(id); throw e; }));
     return packCache.get(id);
   }
-  let listCache = null;
-  const getList = (fresh) => (!fresh && listCache) || (listCache = api("emoticons").catch((e) => { listCache = null; throw e; }));
+  // 목록도 로그인 없이 받고, 가진 것·내 것은 여기서 표시 (관리자는 신고 수 때문에 로그인해서)
+  let listCache = null, listAt = 0;
+  async function fetchList(fresh) {
+    const admin = S.isAdmin && S.isAdmin();
+    const r = await api("emoticons" + (fresh ? "?_=" + Date.now() : ""), { public: !admin });
+    if (!admin) {
+      const owned = new Set(((S.points && S.points()) || {}).owned || []), me = S.myUid && S.myUid();
+      r.packs = r.packs.map((p) => ({ ...p, owned: owned.has(p.id), mine: !!me && p.au === me }));
+      // 가려졌어도 내가 가진·만든 묶음은 보이게 (로그인해서 한 번 더)
+      if (me && r.packs.length === 0 && owned.size) { try { return await api("emoticons"); } catch (e) { /* 무시 */ } }
+    }
+    return r;
+  }
+  let bust = false;   // 내가 방금 올리거나·사거나·지운 뒤엔 CDN 에 기억된 것 말고 새로
+  const getList = () => {
+    if (listCache && Date.now() - listAt < 60000) return listCache;   // 1분 안에는 다시 안 받음
+    listAt = Date.now();
+    return (listCache = fetchList(bust).then((r) => { bust = false; return r; }).catch((e) => { listCache = null; bust = true; throw e; }));
+  };
 
   S.renderRich = function (text) {
     const frag = document.createDocumentFragment();
@@ -81,7 +100,7 @@
     async function load() {
       const pts = S.points && S.points();
       const owned = (pts && pts.owned) || [];
-      const list = await getList(true).catch(() => ({ packs: [] }));
+      const list = await getList().catch(() => ({ packs: [] }));
       if (!owned.length) {
         // 가진 게 없으면: 무료·싼 것부터 바로 받기
         const cheap = list.packs.filter((p) => !p.hidden).sort((a, b) => a.price - b.price).slice(0, 8);
@@ -171,7 +190,7 @@
     app.append(body);
     if (tab === "make") return makeForm(body);
     body.append(el("p", { class: "muted" }, "불러오는 중…"));
-    getList(true).then((r) => {
+    getList().then((r) => {
       const packs = tab === "mine" ? r.packs.filter((p) => p.owned || p.mine) : r.packs;
       if (!packs.length) {
         body.replaceChildren(el("div", { class: "empty" }, tab === "mine" ? "아직 가진 이모티콘이 없어요." : "아직 올라온 이모티콘이 없어요. 첫 번째로 만들어 보세요!",
@@ -196,12 +215,14 @@
     const grid = el("div", { class: "emo-grid big" }, el("span", { class: "muted small" }, "불러오는 중…"));
     const msg = el("div", { class: "msg" });
     const act = el("div", { class: "row" });
-    const refresh = () => { listCache = null; packCache.delete(p.id); close(); S.reload ? S.reload() : location.reload(); };
+    const refresh = () => { listCache = null; bust = true; packCache.delete(p.id); close(); S.reload ? S.reload() : location.reload(); };
     if (!p.owned) {
       const buy = el("button", { class: "btn", type: "button" }, p.price ? `🪙 ${p.price}에 사기` : "무료로 받기");
       buy.addEventListener("click", async () => {
         if (!S.isLoggedIn()) return S.openAccount();
         buy.disabled = true;
+        // 아직 서버에 안 보낸 포인트(방금 맞힌 문제)가 있으면 먼저 보내고 사기
+        if (S.points() && S.points().pending && S.syncNow) await S.syncNow();
         try { const r = await post({ action: "buy", id: p.id }); S.setPoints(r.points); S.toast(`「${p.name}」을(를) 샀어요!`); refresh(); }
         catch (e) { msg.textContent = e.message; msg.className = "msg err"; buy.disabled = false; }
       });
@@ -274,7 +295,7 @@
       btn.disabled = true; msg.textContent = "올리는 중…"; msg.className = "msg";
       try {
         const r = await post({ action: "create", name: name.value, desc: desc.value, price: Number(price.value), images });
-        S.setPoints(r.points); listCache = null;
+        S.setPoints(r.points); listCache = null; bust = true;
         S.toast(`「${r.pack.name}」을(를) 올렸어요!`);
         location.hash = "#/shop/mine";
       } catch (e) { msg.textContent = e.message; msg.className = "msg err"; }

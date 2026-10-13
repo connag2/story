@@ -28,12 +28,14 @@
   }
 
   let auth = parse(LS.get(AUTH), null); // { token, name }
-  let status = "", busy = false, again = false, lastOk = 0, noServer = false;
+  // lastOk 는 이 기기에 기억 → 새로고침해도 10분 안이고 바뀐 게 없으면 서버에 묻지 않음
+  let status = "", busy = false, again = false, lastOk = Number(LS.get("sync-last")) || 0, noServer = false;
 
   async function api(path, opts = {}) {
     const r = await fetch("/api/" + path, {
       ...opts,
-      headers: { "content-type": "application/json", ...(auth ? { authorization: "Bearer " + auth.token } : {}), ...(opts.headers || {}) },
+      // opts.public: 로그인 정보 없이 → 모두에게 같은 응답이라 Vercel CDN 이 기억해 줌 (저장소 아끼기)
+      headers: { "content-type": "application/json", ...(auth && !opts.public ? { authorization: "Bearer " + auth.token } : {}), ...(opts.headers || {}) },
     });
     if (r.status === 404 && !(r.headers.get("content-type") || "").includes("json")) {
       noServer = true;
@@ -146,14 +148,16 @@
     busy = true; setStatus("동기화 중…");
     try {
       const remote = await api("sync");
+      if (Array.isArray(remote.earned)) setEarned(remote.earned);
       const merged = merge(snapshot(), remote.keys || {});
       const changed = apply(merged);
       // 서버와 똑같으면 쓰지 않음 (쓰기는 Blob 연산 중에서도 비싼 편)
       if (!sameKeys(merged, remote.keys || {})) {
         const put = await api("sync", { method: "PUT", body: JSON.stringify({ keys: merged }) });
+        setEarned([...earnedSet, ...oIds()]);              // 서버가 지금 맞힌 것까지 포인트로 넣었어요
         if (put && put.points) setPoints(put.points);
       }
-      lastOk = Date.now();
+      lastOk = Date.now(); LS.set("sync-last", String(lastOk));
       setStatus("");
       if (changed) S.reload();
     } catch (e) {
@@ -165,10 +169,14 @@
   }
 
   let timer = 0;
-  const later = (ms = 4000) => { if (!auth) return; clearTimeout(timer); timer = setTimeout(sync, ms); };
+  const later = (ms = 4000, lazy) => { if (!auth) return; clearTimeout(timer); timer = setTimeout(() => sync(lazy), ms); };
+  // 문제를 풀면: 마지막 동기화에서 10분이 지났으면 20초 뒤, 아니면 10분이 되는 때에 한 번 (그 사이 바뀐 건 모아서)
+  //   화면을 떠날 때는 바로 보내요. 기록은 이 기기에 먼저 저장되니 사라지지 않아요.
+  const WRITE_GAP = 600000;
+  const soon = () => later(Math.max(20000, lastOk + WRITE_GAP - Date.now()), true);
 
   function logout() {
-    auth = null; LS.del(AUTH); LS.del(META); LS.del("pts-cache-v1");
+    auth = null; LS.del(AUTH); LS.del(META); LS.del("pts-cache-v1"); LS.del("sync-last"); LS.del(EARNED); LS.del("is-admin");
     points = null; pointListeners.forEach((f) => f(null));
     setStatus(""); paint();
   }
@@ -178,21 +186,48 @@
   const pointListeners = [];
   // 포인트는 이 기기에 기억해 두고, 30분이 지났을 때만 서버에 다시 물어봐요 (동기화 때 바뀌면 같이 옴)
   const PCACHE = "pts-cache-v1";
+  // 맞힌 문제 포인트는 서버에 보내기 전에도 바로 보여 줘요: 서버가 이미 준 목록(earned)에 없는 "맞힘" 수만큼 더해서
+  const EARNED = "pts-earned-v1";
+  const PID = /^[\w-]+\/[\w.-]+\/\d{1,3}-\d{1,3}$/;
+  let earnedSet = new Set(parse(LS.get(EARNED), null) || []), earnedKnown = LS.get(EARNED) != null;
+  function setEarned(list) { earnedSet = new Set(list); earnedKnown = true; LS.set(EARNED, JSON.stringify([...earnedSet])); }
+  const oIds = () => Object.entries(parse(LS.get(PROG), {})).filter(([k, v]) => v === "o" && PID.test(k)).map(([k]) => k);
+  const pending = () => (points && earnedKnown ? oIds().filter((id) => !earnedSet.has(id)).length : 0);
+  const shown = () => (points ? { ...points, points: points.points + pending(), pending: pending() } : null);
+  let lastShown = null;
   function setPoints(p) {
-    const before = points ? points.points : null;
     points = p;
     if (p) LS.set(PCACHE, JSON.stringify({ p, t: Date.now(), who: auth && auth.name })); else LS.del(PCACHE);
-    pointListeners.forEach((f) => f(p));
-    if (p && p.added > 0) toast(`🪙 +${p.added} 포인트! (지금 ${p.points})`);
-    else if (before != null && p && p.points > before) toast(`🪙 지금 ${p.points} 포인트`);
+    const now = shown();
+    pointListeners.forEach((f) => f(now));
+    if (lastShown != null && now && now.points > lastShown) toast(`🪙 지금 ${now.points} 포인트`);   // 판매 수익 등
+    lastShown = now ? now.points : null;
   }
-  S.points = () => points;
+  // 문제를 맞히면 바로 🪙 +1
+  S.onChange(() => {
+    const now = shown();
+    if (!now) return;
+    if (lastShown != null && now.points > lastShown) { toast(`🪙 +${now.points - lastShown} 포인트! (지금 ${now.points})`); pointListeners.forEach((f) => f(now)); }
+    lastShown = now.points;
+  });
+  S.points = () => shown();
+  S.syncNow = () => sync();
+  // 내 계정 id (토큰 안에 있음) · 관리자인지 (포인트 응답에서 기억)
+  S.myUid = () => { try { return auth ? JSON.parse(atob(auth.token.split(".")[0].replace(/-/g, "+").replace(/_/g, "/"))).u : null; } catch (e) { return null; } };
+  S.isAdmin = () => !!auth && LS.get("is-admin") === auth.name;
   S.onPoints = (f) => pointListeners.push(f);
   S.refreshPoints = async (force) => {
     if (!auth) return null;
     const c = parse(LS.get(PCACHE), null);
-    if (!force && c && c.who === auth.name && Date.now() - c.t < 1800000) { if (!points) { points = c.p; pointListeners.forEach((f) => f(points)); } return points; }
-    try { setPoints(await api("points")); } catch (e) { /* 무시 */ }
+    if (!force && c && c.who === auth.name && Date.now() - c.t < 1800000) {
+      if (!points) { points = c.p; const now = shown(); lastShown = now.points; pointListeners.forEach((f) => f(now)); }
+      return shown();
+    }
+    try {
+      const r = await api("points");
+      if (r.admin) LS.set("is-admin", auth.name); else LS.del("is-admin");
+      setPoints(r);
+    } catch (e) { /* 무시 */ }
     return points;
   };
   S.setPoints = setPoints;
@@ -473,14 +508,15 @@
   }
 
   // ── 자동 동기화 (Blob 연산을 아끼도록 띄엄띄엄):
-  //   처음 열 때 · 문제를 풀고 10초 뒤(이어서 풀면 한 번에) · 화면을 떠날 때(바뀐 게 있으면) · 10분마다(바뀐 게 있으면)
-  S.onChange(() => later(10000));
+  //   처음 열 때(10분 안에 맞췄고 바뀐 게 없으면 건너뜀) · 문제를 풀면 모아서 최대 10분에 한 번 ·
+  //   화면을 떠날 때(바뀐 게 있으면) · 10분마다(바뀐 게 있으면)
+  S.onChange(() => soon());
   // 공부방 안에 띄운 영어 공부장(같은 사이트)이 기록을 바꾸면 여기로 알림이 옴
-  window.addEventListener("storage", (e) => { if (e.key && SYNCABLE(e.key)) later(20000); });
+  window.addEventListener("storage", (e) => { if (e.key && SYNCABLE(e.key)) soon(); });
   document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") sync(true); else if (Date.now() - lastOk > 600000) later(300); });
   window.addEventListener("online", () => later(300));
   setInterval(() => { if (document.visibilityState === "visible") sync(true); }, 600000);
-  document.addEventListener("DOMContentLoaded", () => { paint(); later(200); S.refreshPoints(); });
+  document.addEventListener("DOMContentLoaded", () => { paint(); later(200, true); S.refreshPoints(); });
 
   S._sync = { merge, snapshot, fp, get noServer() { return noServer; } };
 })();

@@ -65,6 +65,7 @@ function remember(path, text, ttl) {
   memo.set(path, { text, exp: Date.now() + ttl });
 }
 async function rawRead(path, immutable) {
+  if (process.env.STORE_LOG) console.log("STORE read", path);
   const kind = storeKind();
   if (kind === "redis") return redisGet(path);
   if (kind === "memory") return mem.has(path) ? mem.get(path) : null;
@@ -86,6 +87,7 @@ export async function readJson(path, ttl = 0, { immutable = false } = {}) {
 export async function writeJson(path, data) {
   const body = JSON.stringify(data);
   if (memo.has(path)) remember(path, body, 60_000);
+  if (process.env.STORE_LOG) console.log("STORE write", path);
   const kind = storeKind();
   try {
     if (kind === "redis") return void (await redisSet(path, body));
@@ -182,10 +184,11 @@ export function readToken(req) {
 }
 
 // ── 응답 도우미
-export function json(data, status = 200, cache = "no-store") {
-  return new Response(JSON.stringify(data), {
-    status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": cache },
-  });
+//   cdn: Vercel CDN 에만 주는 기억 시간 (브라우저는 매번 새로 물어봄 → 남이 쓴 새 글도 바로 보임)
+export function json(data, status = 200, cache = "no-store", cdn = null) {
+  const headers = { "content-type": "application/json; charset=utf-8", "cache-control": cache };
+  if (cdn) headers["vercel-cdn-cache-control"] = cdn;
+  return new Response(JSON.stringify(data), { status, headers });
 }
 export async function handle(fn) {
   try { return await fn(); } catch (e) {
@@ -201,9 +204,12 @@ export async function body(req, limit = 3_000_000) {
 }
 
 // ── 로그인한 사람 확인: 토큰 + 저장된 계정 (토큰 버전까지)
-//   계정 파일은 2분 동안 기억(요청마다 읽지 않게). 계정을 고치는 곳(api/auth.js)은 { fresh: true } 로 새로 읽어요.
-export async function authUser(req, { fresh = false } = {}) {
+//   verify 일 때 계정 파일은 2분 동안 기억. 계정을 고치는 곳(api/auth.js)은 { fresh: true } 로 새로 읽어요.
+//   verify:false(기본) 이면 서명된 토큰만 믿고 계정 파일을 읽지 않아요 (읽기 요청·댓글 등 — 저장소 아끼기).
+//   쓰기·돈(포인트)·계정 관련은 verify/fresh 로 계정 파일까지 확인 (비밀번호 변경 · 전체 로그아웃 · 삭제 반영).
+export async function authUser(req, { fresh = false, verify = false } = {}) {
   const p = readToken(req);
+  if (!fresh && !verify) return { id: p.u, rec: { name: p.n, tv: p.v || 0 } };
   const rec = await readJson(`users/${p.u}.json`, fresh ? 0 : 120_000);
   if (!rec || (rec.tv || 0) !== (p.v || 0)) throw new HttpError(401, "로그인이 만료됐어요. 다시 로그인해 주세요.", "auth");
   return { id: p.u, rec };
