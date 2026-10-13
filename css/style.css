@@ -606,3 +606,4 @@ button.tcell { font: inherit; color: inherit; cursor: pointer; }
 .actor .a-tag { font-size: 18px; }
 .actor.on { border-color: var(--blue); background: var(--bluebg); box-shadow: 0 0 0 2px rgba(47, 107, 255, .15); }
 .actor:disabled { opacity: .5; cursor: default; }
+.item:not(:has(> .item-q)) > .star-btn { position: static; display: block; margin: -4px 0 2px auto; }

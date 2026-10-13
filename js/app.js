@@ -165,12 +165,16 @@
 
   // ───────────────────────── 유틸
   const $ = (sel, el = document) => el.querySelector(sel);
+  // 수식 속 "<" (예: $-3<x<3$, $0<a<2$) 가 HTML 태그로 읽혀 글이 사라지지 않게, 진짜 태그가 아닌 "<" 는 &lt; 로 바꿔요
+  const TAG = /^<\/?(b|i|u|s|em|strong|br|div|span|p|ul|ol|li|code|pre|sub|sup|small|table|tr|td|th|thead|tbody|caption|img|hr|mark|h[1-6]|a|blockquote|details|summary|figure|figcaption)(?=[\s>/])/i;
+  const safeHtml = (v) => String(v).replace(/<(?=[A-Za-z/!?])/g, (m, i, str) => (TAG.test(str.slice(i)) ? "<" : "&lt;"));
+
   function h(tag, attrs = {}, ...kids) {
     const el = document.createElement(tag);
     for (const [k, v] of Object.entries(attrs)) {
       if (v == null || v === false) continue;
       if (k === "class") el.className = v;
-      else if (k === "html") el.innerHTML = v;
+      else if (k === "html") el.innerHTML = safeHtml(v);
       else if (k.startsWith("on") && typeof v === "function") el.addEventListener(k.slice(2), v);
       else el.setAttribute(k, v === true ? "" : v);
     }
@@ -1126,5 +1130,5 @@
     today, load, render,
   });
   // 테스트용
-  window.STORY._check = { norm, same, evalNum, subjects };
+  window.STORY._check = { norm, same, evalNum, subjects, safeHtml };
 })();
