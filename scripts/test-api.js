@@ -5,6 +5,7 @@ import { GET as pull, PUT as push } from "../api/sync.js";
 import { GET as cget, POST as cpost } from "../api/comments.js";
 import { GET as eget, POST as epost } from "../api/emoticons.js";
 import { GET as pget } from "../api/points.js";
+import { GET as tget, PREVIEW } from "../api/tts.js";
 
 delete process.env.BLOB_READ_WRITE_TOKEN;
 const call = async (fn, { body, token, method = "POST" } = {}) => {
@@ -167,6 +168,25 @@ assert.equal((await E({ action: "delete", id: pack.id }, tokB)).status, 400, "�
 for (const t of [tokA, tokC, tokD]) await E({ action: "report", id: pack.id }, t);
 assert.equal((await call(eget, { method: "GET", token: tokC })).data.packs.length, 0, "신고 3번 → 상점에서 가림");
 assert.equal((await call(eget, { method: "GET", token: tokA })).data.packs.length, 1, "이미 산 사람은 계속 보임");
+// ── AI 성우: 키가 없으면 꺼짐, 있으면 공부 자료에 있는 글만 읽어 줌
+const tts = async (q) => tget(new Request("http://x/api/tts" + q));
+delete process.env.OPENAI_API_KEY;
+let tr = await (await tts("")).json();
+assert.equal(tr.enabled, false); assert.ok(tr.voices.length >= 4);
+assert.equal((await tts("?v=coral&t=" + encodeURIComponent(PREVIEW[0]))).status, 503, "키 없으면 못 씀");
+process.env.OPENAI_API_KEY = "test-key";
+const realFetch = globalThis.fetch;
+let sent = null;
+globalThis.fetch = async (url, o) => { sent = JSON.parse(o.body); return new Response(new Uint8Array([1, 2, 3]), { status: 200 }); };
+let ta = await tts("?v=coral&s=cute&t=" + encodeURIComponent("Human geography is becoming unclear."));
+assert.equal(ta.status, 200); assert.equal(ta.headers.get("content-type"), "audio/mpeg");
+assert.match(ta.headers.get("cache-control"), /s-maxage=31536000/);
+assert.equal(sent.voice, "coral"); assert.match(sent.instructions, /cute/);
+assert.equal((await tts("?v=coral&t=" + encodeURIComponent("인문 지리학은 모호해지고 있다."))).status, 200, "한국어 해석도 됨");
+assert.equal((await tts("?v=coral&t=" + encodeURIComponent("아무 글이나 읽어 줘"))).status, 403, "자료에 없는 글은 안 됨");
+assert.equal((await tts("?v=nobody&t=" + encodeURIComponent(PREVIEW[0]))).status, 400, "없는 성우");
+globalThis.fetch = realFetch; delete process.env.OPENAI_API_KEY;
+console.log("ok — AI 성우 (꺼짐/켜짐 · 허락된 글만 · CDN 기억)");
 console.log("ok — 대댓글·신고·가림·정지 · 포인트 · 이모티콘 상점 통과");
 console.log("ok — 댓글 게시판 (글쓰기·좋아요·삭제 권한·관리자 상태·도배 방지) 통과");
 console.log("ok — 로그인 API (가입·로그인·복구·변경·전체 로그아웃·삭제·잠금) 통과");

@@ -51,21 +51,35 @@
     return null;
   }
 
-  // ── 🔊 목소리 (브라우저 음성)
-  //   스타일: 🎀 귀엽게(높은 톤 · 밝은 목소리 먼저) / 보통 / 차분하게
-  //   읽기: 영어만 / 영어 → 한국어 / 한국어만,  영어·한국어 목소리는 기기에 있는 것 중에서 고를 수 있어요
+  // ── 🔊 목소리
+  //   성우: 🎙 AI 성우(자연스러운 최신 음성, 서버 /api/tts — 관리자가 켜 두면) 또는 📱 기기 목소리(무료, 기기에 들어 있는 것)
+  //   스타일: 🎀 귀엽게 / 보통 / 차분하게,  읽기: 영어만 / 영어 → 한국어 / 한국어만
+  //   성우 목록은 서버(api/tts.js 의 VOICES)에서 받아 와요 → 나중에 성우를 바꾸거나 늘려도 앱은 그대로.
   const VOICE = "eng-voice-v1";
-  const vpref = () => Object.assign({ style: "cute", read: "en-ko", en: "", ko: "" }, read(VOICE, {}));
+  const vpref = () => Object.assign({ style: "cute", read: "en-ko", en: "", ko: "", actor: "auto" }, read(VOICE, {}));
   const setV = (patch) => write(VOICE, Object.assign(vpref(), patch));
   const STYLES = { cute: { pitch: 1.55, rate: 1.02 }, normal: { pitch: 1, rate: 1 }, calm: { pitch: 0.85, rate: 0.92 } };
-  // 기기마다 목소리 이름이 달라요: 아이폰·맥(Samantha, Junior, Yuna), 윈도우(Ana=어린이, Jenny, Aria, SunHi), 안드로이드·크롬(Google …)
-  //   앞에 있을수록 먼저 골라요
+  const PREVIEW = ["Hi! Let's read this passage together.", "안녕! 같이 읽어 볼까요?"];   // api/tts.js 와 같게
+
+  // AI 성우 목록 (서버에 한 번 물어봄)
+  let cloud = { enabled: false, voices: [] };
+  const cloudReady = fetch("/api/tts").then((r) => (r.ok ? r.json() : null)).then((x) => { if (x) cloud = x; return cloud; }).catch(() => cloud);
+  // 지금 쓸 성우: "device" 또는 AI 성우 id (auto = AI 성우가 켜져 있으면 첫 번째 성우)
+  function actor() {
+    const a = vpref().actor;
+    if (a === "device") return "device";
+    if (!cloud.enabled) return "device";
+    return cloud.voices.some((v) => v.id === a) ? a : (cloud.voices[0] || {}).id || "device";
+  }
+
+  // 기기 목소리: 아이폰·맥(Samantha, Junior, Yuna), 윈도우·엣지(Ana=어린이, Jenny, Aria, SunHi · "Natural" 은 최신 음성), 안드로이드·크롬(Google …)
   const CUTE = {
     en: ["Junior", "Ana", "Jenny", "Aria", "Ava", "Samantha", "Allison", "Nicky", "Karen", "Tessa", "Google US English", "Zira", "Female"],
-    ko: ["Yuna", "Sora", "SunHi", "Heami", "Seoyeon", "Jimin", "Google 한국", "Female", "여성"],
+    ko: ["SunHi", "Yuna", "Sora", "Heami", "Seoyeon", "Jimin", "Google 한국", "Female", "여성"],
   };
   const nameRe = (n) => new RegExp(`(^|[^A-Za-z])${n}(?![A-Za-z])`, "i");   // "Ana" 는 맞지만 "Diana" 는 아님
   const isCute = (lang, name) => CUTE[lang].some((n) => nameRe(n).test(name));
+  const isNatural = (v) => /Natural|Neural|Online|Enhanced|Premium/i.test(v.name);   // 기기 안의 최신(신경망) 음성
   let voices = [];
   const loadVoices = () => { voices = window.speechSynthesis ? speechSynthesis.getVoices() : []; return voices; };
   if (window.speechSynthesis) { loadVoices(); try { speechSynthesis.addEventListener("voiceschanged", loadVoices); } catch (e) { speechSynthesis.onvoiceschanged = loadVoices; } }
@@ -73,11 +87,34 @@
   function voiceFor(lang) {
     const vp = vpref(), list = voicesOf(lang);
     if (vp[lang]) { const v = list.find((x) => x.name === vp[lang]); if (v) return v; }
-    if (vp.style === "cute") for (const n of CUTE[lang]) { const v = list.find((x) => nameRe(n).test(x.name)); if (v) return v; }
+    // 최신 음성(Natural 등) 먼저, 그다음 귀여운 이름
+    const nat = list.filter(isNatural);
+    for (const pool of [nat, list]) {
+      if (vp.style === "cute") for (const n of CUTE[lang]) { const v = pool.find((x) => nameRe(n).test(x.name)); if (v) return v; }
+      if (pool.length && pool === nat) return (lang === "en" && nat.find((x) => /^en(-|_)US/i.test(x.lang))) || nat[0];
+    }
     return (lang === "en" && list.find((x) => /^en(-|_)US/i.test(x.lang))) || list[0] || null;
   }
-  // 한 마디 읽기 → 끝나면 Promise 가 풀려요
+
+  // 소리 하나만 나게: 기기 음성·AI 음성 모두 멈춤
+  const player = typeof Audio !== "undefined" ? new Audio() : null;
+  let playToken = 0;
+  function hush() {
+    playToken++;
+    if (window.speechSynthesis) speechSynthesis.cancel();
+    if (player) { player.pause(); player.onended = player.onerror = player.ontimeupdate = null; }
+  }
+  const ttsUrl = (text, voice) => `/api/tts?v=${encodeURIComponent(voice)}&s=${vpref().style}&t=${encodeURIComponent(text)}`;
+  // 다음 문장을 미리 받아 두기 (AI 성우일 때)
+  function prefetch(text) { const a = actor(); if (a !== "device" && text) fetch(ttsUrl(text, a)).catch(() => {}); }
+
+  // 한 마디 읽기 → 끝나면 Promise 가 풀려요.  onboundary({ charIndex }) 로 읽는 위치를 알려 줌
   function say(text, lang, { rate, onboundary } = {}) {
+    const a = actor();
+    if (a !== "device" && player) return sayCloud(text, lang, a, { rate, onboundary });
+    return sayDevice(text, lang, { rate, onboundary });
+  }
+  function sayDevice(text, lang, { rate, onboundary } = {}) {
     return new Promise((done) => {
       if (!window.speechSynthesis || !text) return done();
       const st = STYLES[vpref().style] || STYLES.normal;
@@ -91,40 +128,71 @@
       speechSynthesis.speak(u);
     });
   }
+  function sayCloud(text, lang, voice, { rate, onboundary } = {}) {
+    return new Promise((done) => {
+      if (!text) return done();
+      const my = ++playToken;
+      let started = false;
+      player.onended = () => { if (my === playToken) done(); };
+      player.onerror = () => {
+        if (my !== playToken) return;
+        // AI 음성이 안 되면(꺼짐·인터넷 끊김) 기기 목소리로
+        if (!started) sayDevice(text, lang, { rate, onboundary }).then(done); else done();
+      };
+      // AI 음성은 단어 위치를 안 알려 줘서, 재생한 비율로 읽는 곳을 짐작해요
+      player.ontimeupdate = () => {
+        if (my !== playToken || !onboundary || !player.duration) return;
+        onboundary({ charIndex: Math.floor(text.length * (player.currentTime / player.duration)) });
+      };
+      player.src = ttsUrl(text, voice);
+      player.playbackRate = Math.min(2, Math.max(0.5, rate || read(PREF, {}).rate || 0.9));
+      try { player.preservesPitch = true; } catch (e) { /* 무시 */ }
+      player.play().then(() => { started = true; }).catch(() => { if (my === playToken) sayDevice(text, lang, { rate, onboundary }).then(done); });
+    });
+  }
   function speak(text, rate, lang = "en") {
-    if (!window.speechSynthesis) { if (S.toast) S.toast("이 브라우저는 읽어 주기를 지원하지 않아요."); return Promise.resolve(); }
-    speechSynthesis.cancel();
+    if (!window.speechSynthesis && !player) { if (S.toast) S.toast("이 브라우저는 읽어 주기를 지원하지 않아요."); return Promise.resolve(); }
+    hush();
     return say(text, lang, { rate });
   }
   // 영어 + 뜻 이어서
   async function speakPair(en, ko, rate) { await speak(en, rate, "en"); if (ko && vpref().read !== "en") await say(ko, "ko", { rate }); }
 
-  // 목소리 설정 칸 (본문 해설 화면의 ⚙️ 보기 설정 안)
+  // 성우 · 목소리 설정 칸 (본문 해설 화면의 ⚙️ 보기 설정 안)
   function voicePanel() {
     const wrap = el("div", { class: "eng-voice" });
     const paint = () => {
-      const vp = vpref();
+      const vp = vpref(), cur = actor();
       const seg = (label, key, vals) => el("div", { class: "seg" }, el("b", {}, label), vals.map(([v, t]) =>
         el("button", { class: "chip" + (vp[key] === v ? " on" : ""), type: "button", onclick: () => { setV({ [key]: v }); paint(); if (key === "style") preview(); } }, t)));
+      const card = (id, tag, name, desc) => el("button", { class: "actor" + (cur === id ? " on" : ""), type: "button", disabled: id !== "device" && !cloud.enabled, onclick: () => { setV({ actor: id }); paint(); preview(); } },
+        el("span", { class: "a-tag" }, tag), el("b", {}, name), el("span", { class: "muted small" }, desc));
       const pick = (lang, label) => {
         const list = voicesOf(lang);
         const sel = el("select", { "aria-label": label, onchange: () => { setV({ [lang]: sel.value }); preview(lang); } },
-          el("option", { value: "" }, `자동 (${vp.style === "cute" ? "귀여운 목소리 먼저" : "기본"})`),
-          list.map((v) => el("option", { value: v.name, ...(vp[lang] === v.name ? { selected: true } : {}) }, `${v.name}${isCute(lang, v.name) ? " 🎀" : ""}`)));
+          el("option", { value: "" }, "자동 (최신 음성 · 귀여운 목소리 먼저)"),
+          list.map((v) => el("option", { value: v.name, ...(vp[lang] === v.name ? { selected: true } : {}) }, `${v.name}${isNatural(v) ? " ✨" : ""}${isCute(lang, v.name) ? " 🎀" : ""}`)));
         return el("label", { class: "row small" }, el("b", {}, label), sel, list.length ? null : el("span", { class: "muted small" }, lang === "ko" ? "이 기기에 한국어 목소리가 없어요" : "목소리를 불러오는 중…"));
       };
       wrap.replaceChildren(
-        seg("목소리", "style", [["cute", "🎀 귀엽게"], ["normal", "보통"], ["calm", "차분하게"]]),
+        el("div", { class: "seg" }, el("b", {}, "성우")),
+        el("div", { class: "actors" },
+          cloud.voices.map((v) => card(v.id, v.tag || "🎙", v.name, cloud.enabled ? v.desc : "AI 성우 — 아직 꺼져 있어요")),
+          card("device", "📱", "기기 목소리", "무료 · 인터넷 없이도")),
+        cloud.enabled ? null : el("p", { class: "muted small", text: "🎙 AI 성우(자연스러운 최신 음성)는 관리자가 Vercel 환경 변수에 OPENAI_API_KEY 를 넣으면 켜져요. 그 전에는 기기 목소리로 읽어요." }),
+        seg("말투", "style", [["cute", "🎀 귀엽게"], ["normal", "보통"], ["calm", "차분하게"]]),
         seg("읽기", "read", [["en", "영어만"], ["en-ko", "영어 → 한국어"], ["ko", "한국어만"]]),
-        pick("en", "영어 목소리"), pick("ko", "한국어 목소리"),
+        cur === "device" ? pick("en", "영어 목소리") : null, cur === "device" ? pick("ko", "한국어 목소리") : null,
         el("div", { class: "row" }, el("button", { class: "btn ghost small", type: "button", onclick: () => preview() }, "🔊 미리 듣기")));
     };
     const preview = async (lang) => {
       const vp = vpref();
-      if (lang !== "ko" && vp.read !== "ko") await speak("Hi! Let's read this passage together.", 0.95, "en");
-      if (lang !== "en" && vp.read !== "en") { if (lang === "ko") speechSynthesis.cancel(); await say("안녕! 같이 읽어 볼까요?", "ko", { rate: 0.95 }); }
+      hush();
+      if (lang !== "ko" && vp.read !== "ko") await say(PREVIEW[0], "en", { rate: 0.95 });
+      if (lang !== "en" && vp.read !== "en") await say(PREVIEW[1], "ko", { rate: 0.95 });
     };
     paint();
+    cloudReady.then(paint);
     if (window.speechSynthesis && !voicesOf("en").length) setTimeout(paint, 800);
     return wrap;
   }
@@ -373,8 +441,7 @@
       }
       // 한 문장: 영어(읽는 단어를 따라 노란색) → 한국어 해석(초록 칸이 반짝)
       async function speakLine(i, done) {
-        if (!window.speechSynthesis) { if (done) done(); return; }
-        speechSynthesis.cancel();
+        hush();
         const my = token, vp = vpref();
         const ws = [...cards[i].querySelectorAll(".eng-en.big .w")];
         if (vp.read !== "ko") {
@@ -405,7 +472,11 @@
           cur = k; timer = setTimeout(step, 700);
         };
         const tm = cards[cur].querySelector(".eng-timer");
-        if (pref.sound && window.speechSynthesis) { tm.style.animation = "none"; speakLine(cur, next); }
+        if (pref.sound && (window.speechSynthesis || player)) {
+          tm.style.animation = "none";
+          if (cur + 1 < lines.length) { const vp = vpref(); if (vp.read !== "ko") prefetch(full[cur + 1]); if (vp.read !== "en") prefetch(cleanKo(lines[cur + 1].ko)); }
+          speakLine(cur, next);
+        }
         else {
           // 조용히: 단어 수에 맞춰 (보통 1분에 130단어) 기다렸다가 내려감
           const words = full[cur].split(/\s+/).length;
@@ -417,7 +488,7 @@
       function start() { auto = true; token++; paintBar(); step(); }
       function stop() {
         auto = false; token++; clearTimeout(timer);
-        if (window.speechSynthesis) speechSynthesis.cancel();
+        hush();
         cards.forEach((c) => { const t = c.querySelector(".eng-timer"); if (t) t.style.animation = "none"; c.querySelectorAll(".speaking").forEach((w) => w.classList.remove("speaking")); });
         paintBar();
       }
