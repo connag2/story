@@ -58,7 +58,8 @@
   const VOICE = "eng-voice-v1";
   const vpref = () => Object.assign({ style: "cute", read: "en-ko", en: "", ko: "", actor: "auto" }, read(VOICE, {}));
   const setV = (patch) => write(VOICE, Object.assign(vpref(), patch));
-  const STYLES = { cute: { pitch: 1.55, rate: 1.02 }, normal: { pitch: 1, rate: 1 }, calm: { pitch: 0.85, rate: 0.92 } };
+  // 톤은 아주 조금만 바꿔요 (기계 음성은 톤을 많이 올리면 무섭게 들려요). 자연스러운 음성에만 적용.
+  const STYLES = { cute: { pitch: 1.1, rate: 1.0 }, normal: { pitch: 1, rate: 1 }, calm: { pitch: 0.96, rate: 0.92 } };
   const PREVIEW = ["Hi! Let's read this passage together.", "안녕! 같이 읽어 볼까요?"];   // api/tts.js 와 같게
 
   // AI 성우 목록 (서버에 한 번 물어봄)
@@ -74,16 +75,18 @@
 
   // 기기 목소리: 아이폰·맥(Samantha, Junior, Yuna), 윈도우·엣지(Ana=어린이, Jenny, Aria, SunHi · "Natural" 은 최신 음성), 안드로이드·크롬(Google …)
   const CUTE = {
-    en: ["Junior", "Ana", "Jenny", "Aria", "Ava", "Samantha", "Allison", "Nicky", "Karen", "Tessa", "Google US English", "Zira", "Female"],
-    ko: ["SunHi", "Yuna", "Sora", "Heami", "Seoyeon", "Jimin", "Google 한국", "Female", "여성"],
+    en: ["Ava", "Jenny", "Aria", "Ana", "Emma", "Samantha", "Allison", "Google US English", "Karen", "Tessa", "Zira"],
+    ko: ["SunHi", "Yuna", "Sora", "Seoyeon", "Jimin", "Google 한국", "Heami"],
   };
   const nameRe = (n) => new RegExp(`(^|[^A-Za-z])${n}(?![A-Za-z])`, "i");   // "Ana" 는 맞지만 "Diana" 는 아님
   const isCute = (lang, name) => CUTE[lang].some((n) => nameRe(n).test(name));
-  const isNatural = (v) => /Natural|Neural|Online|Enhanced|Premium/i.test(v.name);   // 기기 안의 최신(신경망) 음성
+  const isNatural = (v) => /Natural|Neural|Online|Enhanced|Premium|Google|Samantha|Yuna/i.test(v.name);   // 기기 안의 자연스러운 음성
+  // 맥·아이폰의 효과음 목소리(속삭임·로봇·노래 등)는 무섭게 들려서 아예 빼요
+  const NOVELTY = /Junior|Albert|Bad News|Bahh|Bells|Boing|Bubbles|Cellos|Deranged|Good News|Hysterical|Jester|Organ|Superstar|Trinoids|Whisper|Wobble|Zarvox|Fred|Ralph|Kathy|Princess|Agnes|Bruce|Vicki|Victoria|Pipe Organ|eSpeak|espeak/i;
   let voices = [];
   const loadVoices = () => { voices = window.speechSynthesis ? speechSynthesis.getVoices() : []; return voices; };
   if (window.speechSynthesis) { loadVoices(); try { speechSynthesis.addEventListener("voiceschanged", loadVoices); } catch (e) { speechSynthesis.onvoiceschanged = loadVoices; } }
-  const voicesOf = (lang) => loadVoices().filter((v) => (lang === "en" ? /^en/i : /^ko/i).test(v.lang));
+  const voicesOf = (lang) => loadVoices().filter((v) => (lang === "en" ? /^en/i : /^ko/i).test(v.lang) && !NOVELTY.test(v.name));
   function voiceFor(lang) {
     const vp = vpref(), list = voicesOf(lang);
     if (vp[lang]) { const v = list.find((x) => x.name === vp[lang]); if (v) return v; }
@@ -121,8 +124,8 @@
       const u = new SpeechSynthesisUtterance(text);
       u.lang = lang === "ko" ? "ko-KR" : "en-US";
       const v = voiceFor(lang); if (v) u.voice = v;
-      u.pitch = st.pitch;
-      u.rate = Math.min(2, (rate || read(PREF, {}).rate || 0.9) * st.rate * (lang === "ko" ? 1.12 : 1));
+      u.pitch = v && isNatural(v) ? st.pitch : 1;
+      u.rate = Math.min(2, (rate || read(PREF, {}).rate || 0.9) * st.rate * (lang === "ko" ? 1.08 : 1));
       if (onboundary) u.onboundary = onboundary;
       u.onend = u.onerror = () => done();
       speechSynthesis.speak(u);
