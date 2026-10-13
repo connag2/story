@@ -20,7 +20,7 @@ const STATUS = ["", "checking", "planned", "done"];
 const MAX_ITEMS = 3000;
 const EMO = /\[\[emo:([\w-]{1,20}):(\d{1,2})\]\]/g;
 
-async function load() { return (await readJson(PATH)) || { items: [] }; }
+async function load(ttl = 0) { return (await readJson(PATH, ttl)) || { items: [] }; }
 const isHidden = (it) => it.adminHidden === true || (it.adminHidden !== false && (it.reports || []).length >= REPORT_HIDE);
 
 // 보내는 모양: 누가 눌렀는지·신고했는지 목록 대신 개수와 "내가 했는지"만
@@ -48,11 +48,11 @@ export function GET(req) {
     const key = new URL(req.url).searchParams.get("key");
     const me = whoMaybe(req);
     const admin = !!me && isAdmin(me.n);
-    const { items } = await load();
+    const { items } = await load(15_000);            // 읽기만 할 때는 15초 기억 (Blob 연산 아끼기)
     const list = (key ? items.filter((it) => it.key === key) : items)
       .slice().sort((a, b) => b.t - a.t).slice(0, 400)
       .map((it) => view(it, me && me.u, admin));
-    return json({ items: list, admin });
+    return json({ items: list, admin }, 200, "private, max-age=10");
   });
 }
 

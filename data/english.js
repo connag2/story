@@ -14,3 +14,8 @@ STORY.addSubject({
   },
   units: [],
 });
+
+// 영어 본문 해설 (data/english-notes-*.js) — 화면은 js/english.js (#/eng)
+//   STORY.addEnglishNotes(팩id, { 단원id: { topic?, gist, flow: [], tips: [], lines: [{ role, chunks: [[영어, 뜻]], words: [[단어, 뜻]], tip }] } })
+STORY.engNotes = {};
+STORY.addEnglishNotes = function (pid, map) { STORY.engNotes[pid] = Object.assign(STORY.engNotes[pid] || {}, map); };

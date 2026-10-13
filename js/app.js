@@ -359,6 +359,7 @@
       h("a", { class: "qtile board-tile", href: "#/board" }, h("b", {}, "💬 피드백 게시판"), h("span", {}, "의견 · 나만의 공부법 · 추가 요청")),
       h("a", { class: "qtile shop-tile", href: "#/shop" }, h("b", {}, "😀 이모티콘 상점"), h("span", {}, "한 문제 맞히면 🪙1 · 모아서 사고팔기")),
       h("a", { class: "qtile note-tile", href: "#/note" }, h("b", {}, "📓 필기장"), h("span", {}, "펜 · 태블릿 · 마우스로 필기")),
+      h("a", { class: "qtile eng-tile", href: "#/eng" }, h("b", {}, "📖 영어 본문 해설"), h("span", {}, "요지 · 끊어 읽기 · 해석 · 단어")),
       h("a", { class: "qtile star-tile", href: "#/star" }, h("b", {}, "⭐ 별표 문제"), h("span", {}, `${Object.keys(load(STAR)).length}문항 · 나중에 다시 볼 것`)));
     app.append(hero, scope);
 
@@ -385,6 +386,7 @@
       embedFrame = h("iframe", { class: "embed-frame", src: encodeURI(s.embed), title: s.name, allow: "clipboard-write; autoplay" });
     }
     app.append(embedFrame);
+    if (window.STORY.viewEnglish && s.id === "english") app.append(h("a", { class: "eng-fab", href: "#/eng", title: "지문 해석 · 끊어 읽기 · 요지" }, "📖 본문 해설"));
     const fit = () => {
       const t = $("#top");
       if (!t || !embedFrame) return;
@@ -1086,7 +1088,7 @@
     document.body.classList.remove("embedded", "wide-note");
     if (window.STORY.applySettings) window.STORY.applySettings();
     // 화면 전체 필기: 문제·오답·시험·공부법 화면에서만, 화면마다 따로 저장
-    if (window.STORY.inkPage) window.STORY.inkPage.setKey(["s", "wrong", "test", "guide"].includes(parts[0]) && parts[1] ? route : null);
+    if (window.STORY.inkPage) window.STORY.inkPage.setKey(["s", "wrong", "test", "guide", "eng"].includes(parts[0]) && parts[1] ? route : null);
     renderTop(["s", "wrong", "test", "guide", "note", "star"].includes(parts[0]) ? parts[1] : null);
     if (parts[0] === "s" && parts[2]) viewUnit(app, parts[1], parts[2], parts[3]);
     else if (parts[0] === "s" && parts[1]) viewSubject(app, parts[1]);
@@ -1097,6 +1099,7 @@
     else if (parts[0] === "shop" && window.STORY.viewShop) window.STORY.viewShop(app, parts[1]);
     else if (parts[0] === "note" && window.STORY.viewNotes) window.STORY.viewNotes(app, parts[1]);
     else if (parts[0] === "star") viewStar(app, parts[1]);
+    else if (parts[0] === "eng" && window.STORY.viewEnglish) window.STORY.viewEnglish(app, parts[1], parts[2]);
     else if (parts[0] === "search") viewSearch(app, parts.slice(1).join("/"));
     else viewHome(app);
     window.scrollTo(0, y);

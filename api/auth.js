@@ -84,7 +84,7 @@ export function POST(req) {
     }
 
     // ── 로그인 후
-    const { id, rec } = await authUser(req);
+    const { id, rec } = await authUser(req, { fresh: true });
     const path = `users/${id}.json`;
     switch (action) {
       case "me":

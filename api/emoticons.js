@@ -16,7 +16,7 @@ const packPath = (id) => `emoticons/p/${id}.json`;
 const IMG = /^data:image\/(png|gif|webp|jpeg);base64,[A-Za-z0-9+/=]+$/;
 const MAX_IMAGES = 24, MAX_IMG_BYTES = 200 * 1024, MAX_PACKS_PER_USER = 20, MAX_PRICE = 1000;
 
-const loadIndex = async () => (await readJson(INDEX)) || { packs: [] };
+const loadIndex = async (ttl = 0) => (await readJson(INDEX, ttl)) || { packs: [] };
 const whoMaybe = (req) => { try { return readToken(req); } catch (e) { return null; } };
 const isHidden = (p) => p.adminHidden === true || (p.adminHidden !== false && (p.reports || []).length >= REPORT_HIDE);
 
@@ -35,15 +35,16 @@ export function GET(req) {
     const tok = whoMaybe(req);
     const me = tok && tok.u;
     const admin = !!tok && isAdmin(tok.n);
-    const owned = me ? (await loadPoints(me)).owned : [];
-    const idx = await loadIndex();
+    const owned = me ? (await loadPoints(me, 30_000)).owned : [];
+    const idx = await loadIndex(30_000);
     if (id) {
       const p = idx.packs.find((x) => x.id === id);
       if (!p) throw new HttpError(404, "없는 이모티콘이에요.");
       // 가려진 묶음도 이미 산 사람·만든 사람·관리자는 계속 볼 수 있음
       if (isHidden(p) && !owned.includes(id) && p.authorUid !== me && !admin) throw new HttpError(404, "신고로 가려진 이모티콘이에요.");
-      const data = await readJson(packPath(id));
-      return json({ pack: meta(p, me, owned, admin), images: (data && data.images) || [] });
+      // 그림 묶음은 한 번 올리면 바뀌지 않아요 → 서버도 브라우저도 오래 기억
+      const data = await readJson(packPath(id), 86_400_000, { immutable: true });
+      return json({ pack: meta(p, me, owned, admin), images: (data && data.images) || [] }, 200, "private, max-age=604800");
     }
     const packs = idx.packs
       .filter((p) => !isHidden(p) || admin || p.authorUid === me || owned.includes(p.id))
