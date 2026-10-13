@@ -105,9 +105,12 @@
       mt[id] = Math.max(rt[id] || 0, lt[id] || 0);
       if (st) mp[id] = st;
     }
+    // 키 순서를 고정해서, 서버와 내용이 같으면 시각도 그대로 둠 (같은 내용을 다시 쓰지 않게)
+    const sorted = (o) => JSON.stringify(Object.fromEntries(Object.keys(o).sort().map((k) => [k, o[k]])));
     const now = Date.now();
-    out[PROG] = { v: JSON.stringify(mp), t: now };
-    out[PTIME] = { v: JSON.stringify(mt), t: now };
+    const keep = (k, v) => ({ v, t: remote[k] && remote[k].v === v ? remote[k].t : now });
+    out[PROG] = keep(PROG, sorted(mp));
+    out[PTIME] = keep(PTIME, sorted(mt));
     return out;
   }
 
@@ -124,16 +127,32 @@
     return changed;
   }
 
-  async function sync() {
+  // 이 기기에서 지난 동기화 뒤에 바뀐 게 있는지 (Blob 연산을 아끼려고 바뀐 게 없으면 건너뜀)
+  function dirty() {
+    const meta = parse(LS.get(META), {});
+    for (const k of LS.keys()) if (SYNCABLE(k)) { const m = meta[k]; if (!m || m.h !== fp(LS.get(k))) return true; }
+    for (const k of Object.keys(meta)) if (SYNCABLE(k) && meta[k].h !== null && LS.get(k) == null) return true;
+    return false;
+  }
+  const sameKeys = (a, b) => {
+    const ka = Object.keys(a), kb = Object.keys(b);
+    return ka.length === kb.length && ka.every((k) => b[k] && b[k].v === a[k].v && b[k].t === a[k].t);
+  };
+  //   lazy: 바뀐 게 없고 10분 안에 맞췄으면 서버에 묻지 않음 (다른 기기 기록은 열 때·10분마다 받아 옴)
+  async function sync(lazy) {
     if (!auth) return;
+    if (lazy === true && !dirty() && Date.now() - lastOk < 600000) return;
     if (busy) { again = true; return; }
     busy = true; setStatus("동기화 중…");
     try {
       const remote = await api("sync");
       const merged = merge(snapshot(), remote.keys || {});
       const changed = apply(merged);
-      const put = await api("sync", { method: "PUT", body: JSON.stringify({ keys: merged }) });
-      if (put && put.points) setPoints(put.points);
+      // 서버와 똑같으면 쓰지 않음 (쓰기는 Blob 연산 중에서도 비싼 편)
+      if (!sameKeys(merged, remote.keys || {})) {
+        const put = await api("sync", { method: "PUT", body: JSON.stringify({ keys: merged }) });
+        if (put && put.points) setPoints(put.points);
+      }
       lastOk = Date.now();
       setStatus("");
       if (changed) S.reload();
@@ -149,7 +168,7 @@
   const later = (ms = 4000) => { if (!auth) return; clearTimeout(timer); timer = setTimeout(sync, ms); };
 
   function logout() {
-    auth = null; LS.del(AUTH); LS.del(META);
+    auth = null; LS.del(AUTH); LS.del(META); LS.del("pts-cache-v1");
     points = null; pointListeners.forEach((f) => f(null));
     setStatus(""); paint();
   }
@@ -157,16 +176,25 @@
   // ── 포인트 (서버가 계산: 처음 맞힌 문제마다 1점 + 이모티콘 판매 수익 − 쓴 것)
   let points = null;
   const pointListeners = [];
+  // 포인트는 이 기기에 기억해 두고, 30분이 지났을 때만 서버에 다시 물어봐요 (동기화 때 바뀌면 같이 옴)
+  const PCACHE = "pts-cache-v1";
   function setPoints(p) {
     const before = points ? points.points : null;
     points = p;
+    if (p) LS.set(PCACHE, JSON.stringify({ p, t: Date.now(), who: auth && auth.name })); else LS.del(PCACHE);
     pointListeners.forEach((f) => f(p));
     if (p && p.added > 0) toast(`🪙 +${p.added} 포인트! (지금 ${p.points})`);
     else if (before != null && p && p.points > before) toast(`🪙 지금 ${p.points} 포인트`);
   }
   S.points = () => points;
   S.onPoints = (f) => pointListeners.push(f);
-  S.refreshPoints = async () => { if (!auth) return null; try { setPoints(await api("points")); } catch (e) { /* 무시 */ } return points; };
+  S.refreshPoints = async (force) => {
+    if (!auth) return null;
+    const c = parse(LS.get(PCACHE), null);
+    if (!force && c && c.who === auth.name && Date.now() - c.t < 1800000) { if (!points) { points = c.p; pointListeners.forEach((f) => f(points)); } return points; }
+    try { setPoints(await api("points")); } catch (e) { /* 무시 */ }
+    return points;
+  };
   S.setPoints = setPoints;
   function toast(text) {
     const t = el("div", { class: "toast", role: "status" }, text);
@@ -217,7 +245,7 @@
   function signedIn(r) {
     auth = { token: r.token, name: r.name || (auth && auth.name) };
     LS.set(AUTH, JSON.stringify(auth));
-    setTimeout(() => S.refreshPoints(), 0);
+    setTimeout(() => S.refreshPoints(true), 0);
   }
   // 버튼을 누르는 동안 두 번 누르지 않게
   function busyBtn(btn, fn) {
@@ -444,13 +472,14 @@
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   }
 
-  // ── 자동 동기화: 처음 열 때, 문제를 풀 때(4초 뒤), 화면을 떠날 때, 2분마다
-  S.onChange(() => later());
+  // ── 자동 동기화 (Blob 연산을 아끼도록 띄엄띄엄):
+  //   처음 열 때 · 문제를 풀고 10초 뒤(이어서 풀면 한 번에) · 화면을 떠날 때(바뀐 게 있으면) · 10분마다(바뀐 게 있으면)
+  S.onChange(() => later(10000));
   // 공부방 안에 띄운 영어 공부장(같은 사이트)이 기록을 바꾸면 여기로 알림이 옴
-  window.addEventListener("storage", (e) => { if (e.key && SYNCABLE(e.key)) later(); });
-  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") sync(); else later(300); });
+  window.addEventListener("storage", (e) => { if (e.key && SYNCABLE(e.key)) later(20000); });
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") sync(true); else if (Date.now() - lastOk > 600000) later(300); });
   window.addEventListener("online", () => later(300));
-  setInterval(() => { if (document.visibilityState === "visible") sync(); }, 120000);
+  setInterval(() => { if (document.visibilityState === "visible") sync(true); }, 600000);
   document.addEventListener("DOMContentLoaded", () => { paint(); later(200); S.refreshPoints(); });
 
   S._sync = { merge, snapshot, fp, get noServer() { return noServer; } };

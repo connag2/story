@@ -12,16 +12,33 @@ async function blobApi() {
   return blob;
 }
 
-export async function readJson(path) {
+// ── Blob 사용량 줄이기: 같은 서버 인스턴스 안에서 잠깐 기억해 두기
+//   readJson(path, ttl) — ttl(ms) 안에 다시 읽으면 Blob 에 가지 않음. 읽어서 고쳐 쓰는 곳(POST)은 ttl 없이 항상 새로 읽어요.
+//   쓰기·지우기는 기억도 함께 고침.
+const memo = new Map();   // path → { text|null, exp }
+const MEMO_MAX = 500;
+function remember(path, text, ttl) {
+  if (memo.size >= MEMO_MAX) memo.delete(memo.keys().next().value);
+  memo.set(path, { text, exp: Date.now() + ttl });
+}
+export async function readJson(path, ttl = 0, { immutable = false } = {}) {
+  const m = ttl && memo.get(path);
+  if (m && m.exp > Date.now()) return m.text == null ? null : JSON.parse(m.text);
   const b = await blobApi();
-  if (!b) return mem.has(path) ? JSON.parse(mem.get(path)) : null;
-  const r = await b.get(path, { access: "private", useCache: false });
-  if (!r || r.statusCode !== 200) return null;
-  return JSON.parse(await new Response(r.stream).text());
+  let text = null;
+  if (!b) text = mem.has(path) ? mem.get(path) : null;
+  else {
+    // 바뀌지 않는 파일(이모티콘 그림)은 Blob 캐시를 써서 연산을 아낌
+    const r = await b.get(path, { access: "private", useCache: immutable });
+    text = r && r.statusCode === 200 ? await new Response(r.stream).text() : null;
+  }
+  if (ttl) remember(path, text, ttl);
+  return text == null ? null : JSON.parse(text);
 }
 
 export async function writeJson(path, data) {
   const body = JSON.stringify(data);
+  if (memo.has(path)) remember(path, body, 60_000);
   const b = await blobApi();
   if (!b) { mem.set(path, body); return; }
   await b.put(path, body, {
@@ -31,6 +48,7 @@ export async function writeJson(path, data) {
 }
 
 export async function removeJson(paths) {
+  paths.forEach((p) => memo.delete(p));
   const b = await blobApi();
   if (!b) { paths.forEach((p) => mem.delete(p)); return; }
   await b.del(paths);
@@ -90,9 +108,9 @@ export function readToken(req) {
 }
 
 // ── 응답 도우미
-export function json(data, status = 200) {
+export function json(data, status = 200, cache = "no-store") {
   return new Response(JSON.stringify(data), {
-    status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" },
+    status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": cache },
   });
 }
 export async function handle(fn) {
@@ -109,9 +127,10 @@ export async function body(req, limit = 3_000_000) {
 }
 
 // ── 로그인한 사람 확인: 토큰 + 저장된 계정 (토큰 버전까지)
-export async function authUser(req) {
+//   계정 파일은 2분 동안 기억(요청마다 읽지 않게). 계정을 고치는 곳(api/auth.js)은 { fresh: true } 로 새로 읽어요.
+export async function authUser(req, { fresh = false } = {}) {
   const p = readToken(req);
-  const rec = await readJson(`users/${p.u}.json`);
+  const rec = await readJson(`users/${p.u}.json`, fresh ? 0 : 120_000);
   if (!rec || (rec.tv || 0) !== (p.v || 0)) throw new HttpError(401, "로그인이 만료됐어요. 다시 로그인해 주세요.", "auth");
   return { id: p.u, rec };
 }

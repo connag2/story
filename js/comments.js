@@ -190,7 +190,7 @@
       el("div", { class: "row" }, btn, picker ? picker.button : null, parent ? null : who), msg);
   }
 
-  // ── 새 글 알림: 목록이 화면에 있는 동안 25초마다 확인 → "새 댓글 N개 · 새로고침" 버튼
+  // ── 새 글 알림: 목록이 화면에 있는 동안 1분마다 확인 → "새 댓글 N개 · 새로고침" 버튼
   //   shown() = 지금 보이는 글 id 들, reload() = 다시 불러오기
   function watchNew(anchor, key, shown, reload) {
     const btn = el("button", { class: "btn small cm-new hidden", type: "button" });
@@ -210,7 +210,7 @@
       } catch (e) { /* 다음에 다시 */ }
     };
     const onVis = () => { if (document.visibilityState === "visible") check(); };
-    timer = setInterval(check, 25000);
+    timer = setInterval(check, 60000);   // 1분마다 (Blob 연산 아끼기 · 서버도 15초 기억)
     document.addEventListener("visibilitychange", onVis);
     btn.hide = () => btn.classList.add("hidden");
     return btn;
