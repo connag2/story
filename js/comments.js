@@ -291,7 +291,18 @@
       const paintBans = (bans) => list.replaceChildren(...(bans.length ? bans.map((b) => el("span", { class: "chip" }, b.name, " ",
         el("button", { class: "link", type: "button", onclick: async () => paintBans((await post({ action: "unban", name: b.name })).bans) }, "풀기")))
         : [el("span", { class: "muted small" }, "글쓰기 정지된 사람이 없어요.")]));
-      adminBox.replaceChildren(el("details", { class: "acct-sec" }, el("summary", {}, "🛡 관리자: 글쓰기 정지 목록"), list));
+      // 저장소를 Blob → Upstash Redis 로 바꾼 뒤, Blob 이 다시 열리면 예전 계정·기록을 가져오기
+      const mig = el("button", { class: "btn ghost small", type: "button" }, "📦 예전 Blob 기록 가져오기");
+      const migMsg = el("span", { class: "muted small" });
+      mig.addEventListener("click", async () => {
+        if (!confirm("예전 Blob 저장소의 계정·기록을 지금 저장소로 가져올까요? (이미 있는 것은 그대로 둬요)")) return;
+        mig.disabled = true; migMsg.textContent = "가져오는 중…";
+        try { const r = await S.api("migrate", { method: "POST", body: "{}" }); migMsg.textContent = `가져옴 ${r.copied}개 · 이미 있어서 건너뜀 ${r.skipped}개`; }
+        catch (e) { migMsg.textContent = e.message; }
+        finally { mig.disabled = false; }
+      });
+      adminBox.replaceChildren(el("details", { class: "acct-sec" }, el("summary", {}, "🛡 관리자: 글쓰기 정지 목록 · 저장소"), list,
+        el("div", { class: "row" }, mig, migMsg)));
       try { paintBans((await post({ action: "bans" })).bans); } catch (e) { list.textContent = e.message; }
     }
     // 아직 반영 안 된 요청·오류를 한 번에 복사 → Claude 에게 붙여 넣기
