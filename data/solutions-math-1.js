@@ -72,7 +72,18 @@
     "2/4-0": [r`그래프에서 좌극한·우극한을 읽어요: $f$ 는 $0-$ 에서 $2$, $0+$ 에서 $-1$`, r`$g$ 는 $0-$ 에서 $1$, $0+$ 에서 $3$`, r`극한이 존재하려면 좌극한 $=$ 우극한: $2+k\cdot1=-1+3k$`, r`$2k=3$ 이므로 $k=\dfrac32$`],
     "2/5-0": [r`분모를 인수분해: $x^2+x-6=(x+3)(x-2)$`, r`$\dfrac{2xf(x-2)}{(x+3)(x-2)}=\dfrac{2x}{x+3}\cdot\dfrac{f(x-2)}{x-2}$`, r`$\dfrac{2x}{x+3}\to\dfrac45$ 이므로 $\dfrac45\times15=12$`],
     "2/6-0": [r`$g(x)=\{2f(x)+g(x)\}-2f(x)$ 로 나타내요.`, r`두 극한이 모두 존재하므로 $\displaystyle\lim g(x)=8-2\cdot1=6$`],
-    "2/7-0": [r`$h(x)=2f(x)-3g(x)$ 로 두면 $f(x)=\dfrac{h(x)+3g(x)}{2}$, $h(x)\to1$`, r`$4f+g=2h+7g$, $\;3f-g=\dfrac{3h+7g}{2}$`, r`식 $=\dfrac{2(2h+7g)}{3h+7g}$ 의 분모·분자를 $g(x)$ 로 나눠요.`, r`$\dfrac{h}{g}\to0$ 이므로 $\dfrac{2\cdot7}{7}=2$`],
+    "2/7-0": [
+      r`<b>왜 바로 못 풀까?</b> $g(x)\to\infty$ 이고 $f(x)$ 도 같이 커져요. 그래서 $\dfrac{4f+g}{3f-g}$ 는 $\dfrac{\infty}{\infty}$ 꼴이라, $f$ 와 $g$ 의 극한을 따로 넣을 수 없어요. (극한의 성질은 <b>수렴할 때만</b> 쓸 수 있어요.)`,
+      r`<b>아는 것을 새 이름으로.</b> 조건에서 수렴하는 건 $2f(x)-3g(x)$ 하나뿐이에요. 이걸 $h(x)=2f(x)-3g(x)$ 로 두면 $\displaystyle\lim_{x\to\infty}h(x)=1$ 이에요.`,
+      r`<b>$f$ 를 $h$ 와 $g$ 로 바꾸기.</b> $2f(x)=h(x)+3g(x)$ 이므로 $f(x)=\dfrac{h(x)+3g(x)}{2}$ 예요. 이제 식에 $f$ 대신 이걸 넣어요.`,
+      r`<b>분자 계산.</b> $4f+g=4\cdot\dfrac{h+3g}{2}+g=2h+6g+g=2h+7g$`,
+      r`<b>분모 계산.</b> $3f-g=3\cdot\dfrac{h+3g}{2}-g=\dfrac{3h+9g-2g}{2}=\dfrac{3h+7g}{2}$`,
+      r`<b>합치기.</b> $\dfrac{4f+g}{3f-g}=\dfrac{2h+7g}{\frac{3h+7g}{2}}=\dfrac{2(2h+7g)}{3h+7g}$ (분모의 $\frac12$ 은 뒤집어서 분자에 $2$ 를 곱해요.)`,
+      r`<b>가장 빨리 커지는 $g$ 로 나누기.</b> ($\dfrac{\infty}{\infty}$ 꼴은 분모·분자를 제일 큰 것으로 나눠요) → $\dfrac{2\left(2\cdot\frac{h}{g}+7\right)}{3\cdot\frac{h}{g}+7}$`,
+      r`<b>$\dfrac{h}{g}$ 는 어디로?</b> $h\to1$ (그냥 숫자 1 근처), $g\to\infty$ 이니까 $\dfrac{h}{g}\approx\dfrac{1}{\text{엄청 큰 수}}\to0$ 이에요.`,
+      r`<b>답.</b> $\dfrac{2(0+7)}{0+7}=\dfrac{14}{7}=2$`,
+      r`<b>💡 감으로 확인.</b> $2f-3g\to1$ 이면 $x$ 가 아주 클 때 $2f\approx3g$, 즉 $f\approx\dfrac32g$ 예요. 넣어 보면 $\dfrac{4\cdot\frac32g+g}{3\cdot\frac32g-g}=\dfrac{7g}{\frac72g}=2$ ✔ (시험에선 위 풀이처럼 써야 해요.)`,
+    ],
 
     // ── 단원 3 미정계수의 결정, 극한의 대소관계 ──
     "3/0-0": [r`양쪽 함수의 극한을 구해요: $\displaystyle\lim_{x\to0}(1-2x^2)=1$, $\displaystyle\lim_{x\to0}(x^2+1)=1$`, r`양쪽 극한이 같으므로 함수의 극한의 대소관계(샌드위치)에 의해 $\displaystyle\lim_{x\to0}f(x)=1$`],
