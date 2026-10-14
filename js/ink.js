@@ -61,17 +61,23 @@
   const toolPrefs = () => (prefs.tool === "hl" ? prefs.hl : prefs.pen);
   // 손가락으로 쓸지: 켜기 / 끄기 / 자동(펜을 쓴 적 없으면 손가락으로 씀)
   const fingerDraws = () => prefs.finger === "on" || (prefs.finger === "auto" && !prefs.penSeen);
+  // 손가락 모드: draw(손가락으로 씀) · scroll(브라우저가 그대로 넘김 — 관성·확대 그대로) · block(손바닥 막기, 두 손가락으로만 넘김)
+  const fingerMode = () => (prefs.finger === "block" ? "block" : fingerDraws() ? "draw" : "scroll");
 
   // ───────────────────────── 필기 판 하나
   //   두 장의 canvas: 아래(다 쓴 획) + 위(지금 쓰는 획). 쓰는 동안은 위 장만 다시 그려서 빠르고 부드러워요.
-  //   opts.viewport: 화면(창) 크기만 한 종이를 고정해 두고 스크롤에 맞춰 보이는 획만 그림 → 긴 페이지도 가벼움 (화면 전체 필기)
+  //   opts.viewport (화면 전체 필기): 다 쓴 획은 페이지에 붙은 조각 종이(1024px 높이씩, 획이 있는 곳만 만듦)에 그려서
+  //     손으로 스크롤해도 글씨와 정확히 같이 움직여요. 지금 쓰는 획만 창 크기의 위 장에 그려요.
   //   opts.logicalWidth: 화면 너비가 달라도 같은 비율로 보여 줌(필기장) · opts.center: 가운데 기준 좌표
   function Pad(host, key, opts = {}) {
     const vp = !!opts.viewport;
-    const cv = el("canvas", { class: "ink-cv" + (vp ? " vp" : "") });
+    const cv = el("canvas", { class: "ink-cv" + (vp ? " hidden" : "") });
     const live = el("canvas", { class: "ink-cv live" + (vp ? " vp" : "") });
-    host.append(cv, live);
+    const tilesEl = vp ? el("div", { class: "ink-tiles" }) : null;
+    host.append(...[tilesEl, cv, live].filter(Boolean));
     const ctx = cv.getContext("2d");
+    const TILE = 1024;
+    let tiles = [];                                   // { cv, ctx, y0, on }
     const lctx = live.getContext("2d", { desynchronized: true }) || live.getContext("2d");
     let strokes = loadInk(key);
     const undo = [], redo = [];
@@ -82,6 +88,7 @@
     const sx = () => (vp ? window.scrollX : 0), sy = () => (vp ? window.scrollY : 0);
 
     function size() {
+      if (vp) { tiles.forEach((t) => t.cv.remove()); tiles = []; }
       W = host.clientWidth;
       H = vp ? window.innerHeight : (opts.height ? opts.height() : host.clientHeight);
       k = opts.logicalWidth ? W / opts.logicalWidth : 1;
@@ -89,8 +96,30 @@
       dpr = Math.min(window.devicePixelRatio || 1, 2);
       const cw = vp ? window.innerWidth : W;
       if (H * dpr > 16000) dpr = 16000 / H;
-      for (const c of [cv, live]) { c.width = Math.max(1, Math.round(cw * dpr)); c.height = Math.max(1, Math.round(H * dpr)); c.style.width = cw + "px"; c.style.height = H + "px"; }
+      for (const c of vp ? [live] : [cv, live]) { c.width = Math.max(1, Math.round(cw * dpr)); c.height = Math.max(1, Math.round(H * dpr)); c.style.width = cw + "px"; c.style.height = H + "px"; }
       rebuild();
+    }
+    // 조각 종이: i 번째(위에서 i*1024px)를 필요할 때 만듦
+    function tile(i) {
+      if (!tiles[i]) {
+        const c = el("canvas", { class: "ink-tile" });
+        c.width = Math.max(1, Math.round(W * dpr)); c.height = Math.round(TILE * dpr);
+        c.style.width = W + "px"; c.style.height = TILE + "px"; c.style.top = i * TILE + "px";
+        tilesEl.append(c);
+        tiles[i] = { cv: c, ctx: c.getContext("2d"), y0: i * TILE };
+      }
+      return tiles[i];
+    }
+    // 다 쓴 획 하나를 아래 장(조각 종이)에 얹기
+    function commit(s) {
+      if (!vp) { view(ctx); strokePath(ctx, s); return; }
+      const b = boxOf(s), pad = s.w;
+      const i0 = Math.max(0, Math.floor(((b[1] - pad) * k) / TILE)), i1 = Math.floor(((b[3] + pad) * k) / TILE);
+      for (let i = i0; i <= i1; i++) {
+        const t = tile(i);
+        t.ctx.setTransform(dpr * k, 0, 0, dpr * k, dpr * ox, -dpr * t.y0);
+        strokePath(t.ctx, s);
+      }
     }
     const view = (c) => c.setTransform(dpr * k, 0, 0, dpr * k, dpr * (ox - sx()), -dpr * sy());
 
@@ -128,12 +157,10 @@
     // 아래 장 전체 다시 그리기 (지우기·되돌리기·스크롤 때). 화면 전체 필기는 보이는 획만.
     function rebuild() {
       baseFrame = 0;
-      ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, cv.width, cv.height);
-      view(ctx);
-      const top = sy() / k - 60, bot = (sy() + H) / k + 60;
-      const vis = (s) => { if (!vp) return true; const b = boxOf(s); return b[3] + s.w > top && b[1] - s.w < bot; };
-      strokes.forEach((s) => s.t === "hl" && vis(s) && strokePath(ctx, s));
-      strokes.forEach((s) => s.t !== "hl" && vis(s) && strokePath(ctx, s));
+      if (vp) tiles.forEach((t) => { if (t) { t.ctx.setTransform(1, 0, 0, 1, 0, 0); t.ctx.clearRect(0, 0, t.cv.width, t.cv.height); } });
+      else { ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, cv.width, cv.height); }
+      strokes.forEach((s) => s.t === "hl" && commit(s));
+      strokes.forEach((s) => s.t !== "hl" && commit(s));
       paintLive();
     }
     // 위 장: 지금 쓰는 획 + 미리 짐작한 점(더 빨리 따라오게) + 지우개 동그라미
@@ -204,16 +231,23 @@
     };
     const scroller = () => opts.scroller || window;
 
+    let lastPenAt = -1e9, tapStart = null;
     function down(e) {
       if (!enabled || prefs.tool === "tap") return;
-      if (e.pointerType === "pen" && !prefs.penSeen) { prefs.penSeen = true; savePrefs(); bar.sync(); }
+      if (e.pointerType === "pen") { lastPenAt = performance.now(); if (!prefs.penSeen) { prefs.penSeen = true; savePrefs(); bar.sync(); } }
       if (e.pointerType === "touch") {
         touches.add(e.pointerId);
-        // 두 손가락이거나 손가락 쓰기를 껐으면 → 화면 넘기기
-        if (touches.size > 1 || !fingerDraws()) {
+        const mode = fingerMode();
+        // 손가락 넘기기: 브라우저가 그대로 스크롤(관성·확대 그대로). 톡 누르면 밑의 버튼을 누른 것으로.
+        if (mode === "scroll" && !cur && !erasing) { tapStart = { id: e.pointerId, x: e.clientX, y: e.clientY, t: Date.now() }; return; }
+        // 쓰는 중에 닿은 손(손바닥)은 무시
+        if (cur || erasing) return;
+        // 두 손가락 → 넘기기, 손바닥 막기 모드의 한 손가락 → 무시(톡은 누르기)
+        if (touches.size > 1 || mode === "block") {
           if (cur && cur.touch) { cur = null; scheduleLive(); }
-          scrollY = { id: e.pointerId, y: e.clientY, x0: e.clientX, y0: e.clientY, t: Date.now() };
-          e.preventDefault(); return;
+          if (touches.size > 1) scrollY = { id: e.pointerId, y: e.clientY, x: e.clientX };
+          else tapStart = { id: e.pointerId, x: e.clientX, y: e.clientY, t: Date.now() };
+          return;
         }
       }
       if (e.pointerType === "mouse" && e.button !== 0 && e.button !== 5) return;
@@ -231,8 +265,8 @@
     }
     function move(e) {
       if (scrollY && e.pointerId === scrollY.id) {
-        const dy = scrollY.y - e.clientY; scrollY.y = e.clientY;
-        scroller().scrollBy(0, dy); e.preventDefault(); return;
+        const dy = scrollY.y - e.clientY, dx = scrollY.x - e.clientX; scrollY.y = e.clientY; scrollY.x = e.clientX;
+        scroller().scrollBy(dx, dy); e.preventDefault(); return;
       }
       if (erasing && e.pointerId === erasing.id) {
         const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
@@ -254,11 +288,12 @@
     }
     function up(e) {
       touches.delete(e.pointerId);
-      if (scrollY && e.pointerId === scrollY.id) {
+      if (scrollY && e.pointerId === scrollY.id) { scrollY = null; return; }
+      if (tapStart && e.pointerId === tapStart.id) {
         // 살짝 톡 누른 것이면 → 밑에 있는 버튼·입력칸을 누른 것으로 (필기 중에도 손가락으로 답 고르기)
-        const tap = opts.passTap && e.type === "pointerup" && Date.now() - scrollY.t < 450 &&
-          Math.abs(e.clientX - scrollY.x0) < 10 && Math.abs(e.clientY - scrollY.y0) < 10;
-        scrollY = null;
+        const tap = opts.passTap && e.type === "pointerup" && Date.now() - tapStart.t < 450 &&
+          Math.abs(e.clientX - tapStart.x) < 10 && Math.abs(e.clientY - tapStart.y) < 10;
+        tapStart = null;
         if (tap) passTap(e.clientX, e.clientY);
         return;
       }
@@ -271,7 +306,7 @@
       if (e.type === "pointercancel" && s.p.length < 9) { scheduleLive(); return; }
       delete s.id; delete s.touch;
       strokes.push(s); undo.push({ add: s }); redo.length = 0;
-      view(ctx); strokePath(ctx, s);                   // 아래 장에 바로 얹기 (전체 다시 그리지 않음)
+      commit(s);                                       // 아래 장에 바로 얹기 (전체 다시 그리지 않음)
       paintLive(); changed();
     }
     function passTap(x, y) {
@@ -287,12 +322,29 @@
     live.addEventListener("pointerup", up);
     live.addEventListener("pointercancel", up);
     live.addEventListener("contextmenu", (e) => enabled && e.preventDefault());
+    // 스크롤을 막을지는 touchstart 에서 정해요: 펜·쓰는 중의 손바닥·손가락 쓰기/손바닥 막기 모드면 막고, 아니면 브라우저가 넘김
+    live.addEventListener("touchstart", (e) => {
+      if (!enabled || prefs.tool === "tap") return;
+      const stylus = [...e.changedTouches].some((t) => t.touchType === "stylus") || performance.now() - lastPenAt < 150;
+      const mode = fingerMode();
+      if ((stylus || cur || erasing || mode !== "scroll") && e.cancelable) e.preventDefault();
+    }, { passive: false });
 
     // 크기·스크롤 따라가기
     let ro = null;
-    const onScroll = () => scheduleBase();
+    const onScroll = () => { if (cur || erasing) scheduleLive(); };   // 다 쓴 획은 페이지와 같이 움직여요
     const onResize = () => size();
-    if (vp) { window.addEventListener("scroll", onScroll, { passive: true }); window.addEventListener("resize", onResize); }
+    // 창 크기: 너비가 바뀌면 다시 그리고, 높이만 바뀌면(주소창 숨김 등) 위 장만 맞춤
+    const onWinResize = () => {
+      if (host.clientWidth !== W) return size();
+      H = window.innerHeight;
+      live.width = Math.round(window.innerWidth * dpr); live.height = Math.round(H * dpr);
+      live.style.width = window.innerWidth + "px"; live.style.height = H + "px"; paintLive();
+    };
+    if (vp) {
+      window.addEventListener("scroll", onScroll, { passive: true });
+      window.addEventListener("resize", onWinResize);
+    }
     else {
       ro = new ResizeObserver(() => {
         const w = host.clientWidth, h = opts.height ? opts.height() : host.clientHeight;
@@ -343,7 +395,7 @@
       destroy(noSave) {
         if (saveTimer) noSave ? clearTimeout(saveTimer) : save();
         if (ro) ro.disconnect();
-        if (vp) { window.removeEventListener("scroll", onScroll); window.removeEventListener("resize", onResize); }
+        if (vp) { window.removeEventListener("scroll", onScroll); window.removeEventListener("resize", onWinResize); tilesEl.remove(); }
         cv.remove(); live.remove();
       },
     };
@@ -399,7 +451,7 @@
         const seg = (label, vals, cur, on) => el("div", { class: "seg" }, el("b", {}, label), vals.map(([v, t]) =>
           el("button", { class: "chip" + (cur === v ? " on" : ""), type: "button", onclick: () => { on(v); savePrefs(); sync(); paintPanel(); } }, t)));
         panel.replaceChildren(...[
-          seg("손가락", [["auto", "자동 (펜 쓰면 넘기기만)"], ["on", "손가락으로도 쓰기"], ["off", "넘기기만"]], prefs.finger, (v) => { prefs.finger = v; }),
+          seg("손가락", [["auto", "자동 (펜을 쓰면 손가락은 넘기기)"], ["on", "손가락으로 쓰기"], ["off", "손가락은 넘기기"], ["block", "손바닥 막기 (두 손가락으로 넘기기)"]], prefs.finger, (v) => { prefs.finger = v; }),
           wrap.classList.contains("floating") ? seg("막대", [["bottom", "아래"], ["top", "위"]], prefs.barPos, (v) => { prefs.barPos = v; wrap.classList.toggle("at-top", v === "top"); }) : null,
           el("p", { class: "muted small", text: "펜을 한 번 쓰면 손가락·손바닥은 넘기기만 해요. 펜 지우개 끝이나 옆 버튼을 누르고 쓰면 지우개. 단축키 P 펜 · H 형광펜 · E 지우개 · T 누르기 · Ctrl+Z" })].filter(Boolean));
         return;
