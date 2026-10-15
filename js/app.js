@@ -429,6 +429,7 @@
     if (s.exam) app.append(h("div", { class: "scope" }, h("div", { class: "scope-row" }, h("b", {}, "시험범위"), examBox(s))));
 
     app.append(h("div", { class: "secthd" }, h("b", {}, "단원 고르기"), legend()));
+    if (s.parts) return viewParts(app, s);
     app.append(h("div", { class: "ugrid" }, s.units.map((u) => {
       const st = stats(allItems(u));
       const done = st.total && st.done === st.total && st.o / st.total >= 0.8;
@@ -438,6 +439,44 @@
         h("div", { class: "tp small" }, `${u.sub && /^\d/.test(u.id) ? u.sub + " · " : ""}${st.done}/${st.total}`),
         dots(u.groups.map((g) => g.items)));
     })));
+  }
+
+  // 묶음(parts)이 있는 과목: 시험범위 단원별로 「개념 → 교과서 본문 → 실전」을 한 줄에 모아 보여 줘요
+  //   parts: [{ title, sub, units: [[단원id, 종류, 짧은 이름], ...] }]
+  const uname = (u) => (u.kind ? `${u.kind} · ${u.short || u.title}` : /^\d/.test(u.id) ? `${u.id}. ${u.title}` : u.title);
+  const KINDS = ["개념", "교과서 본문", "실전 연습", "기출", "내신 변형", "작문", "암기"];
+  function orderByParts(s) {
+    if (!s.parts || s._ordered) return;
+    const rank = new Map();
+    s.parts.forEach((p, pi) => p.units.forEach(([id, kind, short], ui) => {
+      rank.set(id, pi * 100 + ui);
+      const u = s.units.find((x) => x.id === id);
+      if (u) Object.assign(u, { part: pi, kind, short });
+    }));
+    s.units.sort((a, b) => (rank.has(a.id) ? rank.get(a.id) : 1e6) - (rank.has(b.id) ? rank.get(b.id) : 1e6));
+    s._ordered = true;
+  }
+  function viewParts(app, s) {
+    const tile = (u) => {
+      const st = stats(allItems(u));
+      const done = st.total && st.done === st.total && st.o / st.total >= 0.8;
+      return h("a", { class: "utile" + (done ? " done" : ""), href: `#/s/${s.id}/${u.id}` },
+        u.kind ? h("span", { class: `kind k${Math.max(0, KINDS.indexOf(u.kind))}` }, u.kind) : null,
+        h("div", { class: "no sm" }, u.short || u.title),
+        h("div", { class: "tp small" }, `${u.sub ? u.sub + " · " : ""}${st.done}/${st.total}`),
+        dots(u.groups.map((g) => g.items)));
+    };
+    s.parts.forEach((p, pi) => {
+      const us = s.units.filter((u) => u.part === pi);
+      if (!us.length) return;
+      const st = stats(us.flatMap(allItems));
+      app.append(h("section", { class: "part" },
+        h("div", { class: "part-hd" }, h("b", {}, p.title), p.sub ? h("span", { class: "muted small" }, p.sub) : null,
+          h("span", { class: "part-st" }, `${st.done}/${st.total}`)),
+        h("div", { class: "ugrid" }, us.map(tile))));
+    });
+    const rest = s.units.filter((u) => u.part == null);
+    if (rest.length) app.append(h("section", { class: "part" }, h("div", { class: "part-hd" }, h("b", {}, "그 밖의 단원")), h("div", { class: "ugrid" }, rest.map(tile))));
   }
 
   // ───────────────────────── 화면: 단원(문제 풀이)
@@ -484,7 +523,7 @@
     app.append(h("div", { class: "uhead" },
       h("div", { class: "uhrow" },
         h("a", { class: "ib ghost back", href: `#/s/${s.id}`, "aria-label": "단원 목록" }, "←"),
-        h("div", { class: "uht" }, h("b", {}, /^\d/.test(u.id) ? `${u.id}. ${u.title}` : u.title), h("span", {}, u.sub || "")),
+        h("div", { class: "uht" }, h("b", {}, uname(u)), h("span", {}, u.sub || "")),
         h("button", { class: "ib ghost", type: "button", title: "기록 초기화", onclick: () => {
           if (!confirm("이 단원의 채점 기록을 모두 지울까요?")) return;
           setStates(items.map((it) => it.id), null); setPos(base, 0); render();
@@ -540,7 +579,7 @@
         const body = h("div", { class: "concept", html: u.concept });
         let done = false;
         app.append(h("details", { class: "cdet", ontoggle: (e) => { if (e.target.open && !done) { typeset(body); done = true; } } },
-          h("summary", {}, /^\d/.test(u.id) ? `${u.id}. ${u.title}` : u.title),
+          h("summary", {}, uname(u)),
           body,
           h("a", { class: "btn small", href: `#/s/${s.id}/${u.id}/one` }, "이 단원 문제 풀기 →")));
       });
@@ -937,7 +976,7 @@
       const b = h("button", { class: "chip on", type: "button", onclick: () => {
         picked.has(u.id) ? picked.delete(u.id) : picked.add(u.id);
         b.classList.toggle("on", picked.has(u.id)); refresh();
-      } }, /^\d/.test(u.id) ? `${u.id}. ${u.title}` : u.title);
+      } }, uname(u));
       return b;
     }));
     const seg = (label, key, values) => h("div", { class: "seg" }, h("b", {}, label), values.map(([v, t]) => {
@@ -1133,6 +1172,7 @@
     e.preventDefault(); location.hash = "#/search";
   });
   document.addEventListener("DOMContentLoaded", () => {
+    subjects.forEach(orderByParts);
     render();
     // 포인트가 바뀌면 위쪽 🪙 와 상점 화면을 새로 그림
     if (window.STORY.onPoints) window.STORY.onPoints(() => { renderTop(currentSid); if (/^#\/shop/.test(location.hash)) render(); });
