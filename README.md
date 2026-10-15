@@ -71,12 +71,36 @@ Vercel Blob 무료 한도는 금방 차서(한도를 넘으면 저장소가 멈�
 
 이후로는 `main`에 push할 때마다 자동으로 배포돼요. GitHub Pages처럼 정적 호스팅에서도 열리지만, 그때는 로그인 대신 백업 파일을 써요.
 
+## Cloudflare Pages에도 올리기 (Vercel과 함께)
+
+Vercel은 그대로 두고 Cloudflare에도 같은 사이트를 올릴 수 있어요. 서버 코드는 같은 `api/*.js`를 `functions/api/[name].js`가 그대로 불러 써요.
+
+1. https://dash.cloudflare.com → **Workers & Pages → Create → Pages → Connect to Git** → `connag2/story` 선택, 브랜치 `main`.
+2. 빌드 설정: **Framework preset: None** · **Build command: `node scripts/build-cf.mjs`** · **Build output directory: `dist`**
+   (`wrangler.toml`에 출력 폴더와 `nodejs_compat` 설정이 들어 있어요.)
+3. **Settings → Variables and Secrets**에 넣기 (값은 채팅에 붙여 넣지 말고 대시보드에 직접):
+   - **저장소 — 둘 중 하나**
+     - (권장) Vercel과 **같은 Upstash Redis**: Vercel의 `KV_REST_API_URL`, `KV_REST_API_TOKEN` 값을 그대로 복사 → 두 사이트가 같은 계정·기록·댓글을 함께 써요.
+     - 또는 **Cloudflare KV**: Workers & Pages → KV → 이름공간 만들기 → id를 `wrangler.toml`의 `[[kv_namespaces]]`에 넣기(주석 풀기). 이때는 계정이 Vercel 쪽과 따로예요.
+   - `AUTH_SECRET` = 아무 긴 임의 문자열 (KV를 쓸 때는 **꼭** 필요. Upstash를 함께 쓰면 없어도 돼요)
+   - `ADMIN_NAMES` = `나다` (관리자 이름)
+   - (선택) `OPENAI_API_KEY` — AI 성우
+4. **Deploy** → `https://story-xxx.pages.dev` 같은 주소가 생겨요. 이후 `main`에 push하면 Vercel과 Cloudflare가 각각 자동 배포해요.
+
+- 로컬에서 Cloudflare 엔진으로 점검:
+  ```bash
+  node scripts/build-cf.mjs
+  npx wrangler pages dev dist --binding AUTH_SECRET=test --binding ADMIN_NAMES=관리자 --binding OPENAI_API_KEY=fake --kv STORY_KV
+  API_BASE=http://localhost:8788 node scripts/test-api.js
+  ```
+- Cloudflare에서는 문자열 코드 실행(`new Function`)이 막혀 있어서, AI 성우가 읽어도 되는 글 목록은 빌드할 때 `dist/_tts-allow.json`으로 미리 만들어요.
+
 ### 로컬에서 실행
 
 ```bash
 npm install
 npm run dev     # http://localhost:3000  (로그인 데이터는 메모리에만 저장)
-npm test        # 정답 채점·동기화 병합·로그인 API 점검
+npm test        # 정답 채점·동기화 병합·로그인 API·Cloudflare 함수 연결 점검
 ```
 
 ### 🎙 AI 성우 켜기 (선택)

@@ -1,0 +1,13 @@
+# Cloudflare Pages 응답 헤더 (Vercel 의 vercel.json headers 와 같은 내용)
+/sw.js
+  Cache-Control: no-cache
+/*.js
+  Cache-Control: public, max-age=0, must-revalidate
+/*.css
+  Cache-Control: public, max-age=0, must-revalidate
+/*.html
+  Cache-Control: public, max-age=0, must-revalidate
+/*.webmanifest
+  Cache-Control: public, max-age=0, must-revalidate
+/
+  Cache-Control: public, max-age=0, must-revalidate
