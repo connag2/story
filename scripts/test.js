@@ -15,7 +15,7 @@ globalThis.addEventListener = () => {};
 globalThis.document = { addEventListener() {}, getElementById() { return null; }, visibilityState: "visible" };
 globalThis.setInterval = () => 0;
 require("../js/app.js");
-for (const f of ["reading", "reading-mock-2026-09", "math", "english", "programming", "programming-2", "korean", "guides",
+for (const f of ["reading", "reading-mock-2026-09", "reading-2", "math", "english", "programming", "programming-2", "korean", "guides",
   "solutions-math-1", "solutions-math-2", "solutions-math-3", "solutions-reading", "solutions-programming", "solutions-korean"]) require(`../data/${f}.js`);
 require("../js/sync.js");
 const { same, subjects } = STORY._check;

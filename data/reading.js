@@ -5,7 +5,8 @@
   const RT = ["사실적 읽기", "추론적 읽기"];
   const CR = ["타당성", "신뢰성", "공정성", "적절성"];
   const FL = ["성급한 일반화", "부적절한 권위에 호소", "흑백 논리", "순환 논증"];
-  const ch = (choices, explain) => ({ type: "choice", choices, explain });
+  // 긴 선택지는 섞어서 보여 줘요 (정답이 늘 첫 번째에 있지 않게)
+  const ch = (choices, explain) => ({ type: "choice", choices, explain, shuffle: choices.length >= 4 && choices.some((c) => c.length > 14) });
   const P = (t) => `<div class="passage">${t}</div>`;
 
   STORY.addSubject({
@@ -13,7 +14,7 @@
     name: "독서와 작문",
     icon: "讀",
     color: "#2a9d74",
-    desc: "송승훈 교과서 · 특성과 태도 · 사실적·추론적 읽기 · 평가하며 읽기",
+    desc: "송승훈 교과서 · 특성과 태도 · 사실적·추론적 읽기 · 평가하며 읽기 · 작문 · 9월 모의고사 변형",
     exam: {
       count: "선다형 24문제 (100점)",
       range: [
