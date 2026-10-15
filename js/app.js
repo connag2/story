@@ -38,6 +38,7 @@
       });
     },
     // 다른 파일에서 과목에 단원을 덧붙일 때 (예: data/reading-mock-2026-09.js)
+    //   단원마다 after: "단원id" 를 주면 그 단원 바로 뒤에 끼워 넣어요
     addUnits(sid, units) {
       const s = subjects.find((x) => x.id === sid);
       if (!s) throw new Error(`과목 ${sid} 이 먼저 등록되어야 해요`);
@@ -45,7 +46,8 @@
         u.groups.forEach((g, gi) => {
           g.items = g.items.map((it, ii) => toItem(it, `${s.id}/${u.id}/${gi}-${ii}`, s.mathInput));
         });
-        s.units.push(u);
+        const at = u.after ? s.units.findIndex((x) => x.id === u.after) : -1;
+        if (at >= 0) s.units.splice(at + 1, 0, u); else s.units.push(u);
       });
     },
   };
