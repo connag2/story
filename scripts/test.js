@@ -50,6 +50,11 @@ const lw = merge({ "sp:ui": { v: "new", t: 9 } }, { "sp:ui": { v: "old", t: 1 } 
 assert.equal(lw["sp:ui"].v, "new");
 
 for (const s of subjects) assert.ok(s.guide, `${s.id} 공부법 없음`);
+// 단원 묶음(parts)이 있는 과목은 모든 단원이 정확히 한 번씩 들어 있어야 함
+for (const s of subjects) if (s.parts) {
+  const ids = s.parts.flatMap((p) => p.units.map((x) => x[0]));
+  assert.deepEqual([...ids].sort(), s.units.map((u) => u.id).sort(), `${s.id} 묶음에 빠지거나 겹친 단원`);
+}
 for (const s of subjects) for (const u of s.units) assert.ok(u.concept, `${s.id}/${u.id} 개념 없음`);
 // 풀이 과정: 해설이 없는 문제는 모두 풀이가 있어야 함 (수학은 전부)
 assert.ok(!STORY._orphanSolutions, `없는 문제의 풀이: ${STORY._orphanSolutions}`);
