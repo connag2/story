@@ -1,11 +1,26 @@
 // 로그인 API 점검 (서버 없이 함수를 바로 호출, 메모리 저장소 사용): node scripts/test-api.js
+//   실제 서버에 대고 돌리기: API_BASE=http://localhost:8788 node scripts/test-api.js
+//     (Cloudflare 로컬: npx wrangler pages dev dist --binding ADMIN_NAMES=관리자 --binding OPENAI_API_KEY=fake)
 import assert from "node:assert/strict";
-import { POST as auth } from "../api/auth.js";
-import { GET as pull, PUT as push } from "../api/sync.js";
-import { GET as cget, POST as cpost } from "../api/comments.js";
-import { GET as eget, POST as epost } from "../api/emoticons.js";
-import { GET as pget } from "../api/points.js";
-import { GET as tget, PREVIEW } from "../api/tts.js";
+import * as authM from "../api/auth.js";
+import * as syncM from "../api/sync.js";
+import * as commentsM from "../api/comments.js";
+import * as emoticonsM from "../api/emoticons.js";
+import * as pointsM from "../api/points.js";
+import * as ttsM from "../api/tts.js";
+
+const BASE = process.env.API_BASE;
+// BASE 가 있으면 함수 대신 그 서버의 /api/이름 으로 보내요
+const via = (name, fn) => (!BASE ? fn : async (req) => fetch(`${BASE}/api/${name}${new URL(req.url).search}`, {
+  method: req.method, headers: req.headers, body: ["GET", "HEAD"].includes(req.method) ? undefined : await req.text(),
+}));
+const auth = via("auth", authM.POST);
+const pull = via("sync", syncM.GET), push = via("sync", syncM.PUT);
+const cget = via("comments", commentsM.GET), cpost = via("comments", commentsM.POST);
+const eget = via("emoticons", emoticonsM.GET), epost = via("emoticons", emoticonsM.POST);
+const pget = via("points", pointsM.GET);
+const tget = via("tts", ttsM.GET);
+const { PREVIEW } = ttsM;
 
 delete process.env.BLOB_READ_WRITE_TOKEN;
 const call = async (fn, { body, token, method = "POST" } = {}) => {
@@ -170,6 +185,13 @@ assert.equal((await call(eget, { method: "GET", token: tokC })).data.packs.lengt
 assert.equal((await call(eget, { method: "GET", token: tokA })).data.packs.length, 1, "이미 산 사람은 계속 보임");
 // ── AI 성우: 키가 없으면 꺼짐, 있으면 공부 자료에 있는 글만 읽어 줌
 const tts = async (q) => tget(new Request("http://x/api/tts" + q));
+if (BASE) {
+  // 서버에 OPENAI_API_KEY=fake 를 넣고 돌려요: 허락된 글은 OpenAI 까지 가서 502, 아닌 글은 403
+  assert.equal((await tts("?v=coral&t=" + encodeURIComponent("Human geography is becoming unclear."))).status, 502, "허락된 글(목록 읽기)");
+  assert.equal((await tts("?v=coral&t=" + encodeURIComponent("아무 글이나 읽어 줘"))).status, 403, "자료에 없는 글은 안 됨");
+  console.log(`ok — ${BASE} 에서 API 전체 통과`);
+  process.exit(0);
+}
 delete process.env.OPENAI_API_KEY;
 let tr = await (await tts("")).json();
 assert.equal(tr.enabled, false); assert.ok(tr.voices.length >= 4);

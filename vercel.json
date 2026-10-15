@@ -21,7 +21,7 @@
   ],
   "functions": {
     "api/tts.js": {
-      "includeFiles": "{공부/packs/*.json,data/english-notes-*.js}"
+      "includeFiles": "{index.html,공부/packs/*.json,data/english-notes-*.js}"
     }
   }
 }

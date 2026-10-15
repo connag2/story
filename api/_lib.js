@@ -1,10 +1,13 @@
 // 서버 공용 코드 (파일 이름이 _ 로 시작하면 Vercel에서 주소로 열리지 않음)
+//   Vercel(api/*.js) 과 Cloudflare Pages(functions/api/[name].js 가 이 파일들을 그대로 불러요) 양쪽에서 돌아가요.
 //
 // 저장소 (먼저 있는 것을 써요)
 //  1) Upstash Redis — Vercel → Storage → Upstash for Redis 를 연결하면 KV_REST_API_URL/KV_REST_API_TOKEN
 //     (또는 UPSTASH_REDIS_REST_URL/UPSTASH_REDIS_REST_TOKEN) 이 생겨요. 무료로 한 달 50만 번이라 넉넉해요.
-//  2) Vercel Blob (비공개) — BLOB_READ_WRITE_TOKEN. 무료 한도가 작아서 예비용.
-//  3) 둘 다 없으면(로컬 개발) 메모리 — 서버를 끄면 사라져요.
+//     Cloudflare 에도 같은 두 값을 넣으면 두 사이트가 같은 계정·기록을 함께 써요.
+//  2) Cloudflare KV — Cloudflare Pages 에 STORY_KV 바인딩을 연결했을 때 (Redis 가 없을 때만)
+//  3) Vercel Blob (비공개) — BLOB_READ_WRITE_TOKEN. 무료 한도가 작아서 예비용.
+//  4) 모두 없으면(로컬 개발) 메모리 — 서버를 끄면 사라져요.
 import { createHash, createHmac, randomBytes, scrypt, timingSafeEqual } from "node:crypto";
 
 const mem = new Map();
@@ -14,11 +17,13 @@ async function blobApi() {
   if (!blob) blob = await import("@vercel/blob");
   return blob;
 }
+const kv = () => globalThis.__STORY_KV || null;          // functions/api/[name].js 가 넣어 줘요
+export const onCloudflare = () => !!globalThis.__STORY_CF;
 
 // ── Upstash Redis (REST — 따로 설치할 것 없음)
 const REDIS_URL = () => process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL || "";
 const REDIS_TOKEN = () => process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN || "";
-export const storeKind = () => (REDIS_URL() && REDIS_TOKEN() ? "redis" : process.env.BLOB_READ_WRITE_TOKEN ? "blob" : "memory");
+export const storeKind = () => (REDIS_URL() && REDIS_TOKEN() ? "redis" : kv() ? "kv" : process.env.BLOB_READ_WRITE_TOKEN ? "blob" : "memory");
 async function redis(cmds) {                 // cmds: [["GET", k], ["SET", k, v]] → 결과 배열
   const r = await fetch(REDIS_URL().replace(/\/$/, "") + "/pipeline", {
     method: "POST", headers: { authorization: `Bearer ${REDIS_TOKEN()}`, "content-type": "application/json" }, body: JSON.stringify(cmds),
@@ -68,6 +73,7 @@ async function rawRead(path, immutable) {
   if (process.env.STORE_LOG) console.log("STORE read", path);
   const kind = storeKind();
   if (kind === "redis") return redisGet(path);
+  if (kind === "kv") return kv().get(K(path));
   if (kind === "memory") return mem.has(path) ? mem.get(path) : null;
   const b = await blobApi();
   // 바뀌지 않는 파일(이모티콘 그림)은 Blob 캐시를 써서 연산을 아낌
@@ -91,6 +97,7 @@ export async function writeJson(path, data) {
   const kind = storeKind();
   try {
     if (kind === "redis") return void (await redisSet(path, body));
+    if (kind === "kv") return void (await kv().put(K(path), body));
     if (kind === "memory") { mem.set(path, body); return; }
     const b = await blobApi();
     await b.put(path, body, {
@@ -104,6 +111,7 @@ export async function removeJson(paths) {
   paths.forEach((p) => memo.delete(p));
   const kind = storeKind();
   if (kind === "redis") return redisDel(paths);
+  if (kind === "kv") { await Promise.all(paths.map((p) => kv().delete(K(p)))); return; }
   if (kind === "memory") { paths.forEach((p) => mem.delete(p)); return; }
   const b = await blobApi();
   await b.del(paths);
@@ -132,7 +140,8 @@ export async function copyBlobToRedis() {
 
 // ── 비밀 값: 토큰 서명용. AUTH_SECRET 을 따로 두는 것을 권장 (없으면 Blob → Redis 토큰을 사용)
 function secret() {
-  const s = process.env.AUTH_SECRET || process.env.BLOB_READ_WRITE_TOKEN || REDIS_TOKEN() || (process.env.VERCEL ? "" : "local-dev-secret");
+  const deployed = process.env.VERCEL || onCloudflare();
+  const s = process.env.AUTH_SECRET || process.env.BLOB_READ_WRITE_TOKEN || REDIS_TOKEN() || (deployed ? "" : "local-dev-secret");
   if (!s) throw new HttpError(503, "서버 설정이 필요해요 (Upstash Redis 연결 또는 AUTH_SECRET).");
   return s;
 }

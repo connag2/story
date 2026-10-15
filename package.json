@@ -2,10 +2,11 @@
   "name": "story",
   "private": true,
   "type": "module",
-  "description": "스토리 공부방 — 정적 페이지 + 로그인/동기화용 Vercel 함수",
+  "description": "스토리 공부방 — 정적 페이지 + 로그인/동기화용 서버 함수 (Vercel · Cloudflare Pages 둘 다)",
   "scripts": {
     "dev": "node scripts/dev-server.js",
-    "test": "node scripts/test-redis.mjs && node scripts/test.js && node scripts/check-html.mjs && node scripts/check-eng-notes.mjs && node scripts/test-api.js"
+    "test": "node scripts/test-redis.mjs && node scripts/test.js && node scripts/check-html.mjs && node scripts/check-eng-notes.mjs && node scripts/test-api.js && node scripts/test-cf.mjs",
+    "build:cf": "node scripts/build-cf.mjs"
   },
   "dependencies": {
     "@vercel/blob": "^2.8.1"

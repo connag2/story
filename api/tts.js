@@ -9,9 +9,15 @@
 //
 // 비용·Blob 아끼기: 같은 글·성우·스타일 요청은 Vercel CDN 이 1년 동안 기억해서 두 번째부터는 돈이 안 들어요.
 //   Blob 저장소는 쓰지 않아요. 아무 글이나 읽히지 못하게, 공부 자료(본문 · 해석 · 끊어 읽기 · 단어)에 있는 글만 허락해요.
-import { readFile, readdir } from "node:fs/promises";
-import { join } from "node:path";
 import { HttpError, handle, json } from "./_lib.js";
+
+// 공부 자료 파일 읽기: Cloudflare 에서는 정적 파일(ASSETS)에서, Vercel·로컬에서는 디스크에서
+const FS = "node:fs/promises";   // 변수로 불러서 Cloudflare 번들에 들어가지 않게
+async function readText(rel) {
+  if (globalThis.__STORY_ASSET) return globalThis.__STORY_ASSET(rel);
+  const { readFile } = await import(FS);
+  return readFile(process.cwd() + "/" + rel, "utf8");
+}
 
 export const VOICES = [
   { id: "coral", name: "코랄", desc: "밝고 귀여운 목소리", tag: "🎀" },
@@ -51,32 +57,34 @@ const provider = () => (process.env.OPENAI_API_KEY ? "openai" : null);
 let allowed = null;
 async function allowList() {
   if (allowed) return allowed;
-  const root = process.cwd();
+  // Cloudflare 는 new Function(문자열 실행)을 막아서, 배포할 때 미리 만든 목록(scripts/build-cf.mjs)을 읽어요
+  if (globalThis.__STORY_CF) return (allowed = new Set(JSON.parse(await readText("_tts-allow.json"))));
+  return (allowed = await buildAllowList());
+}
+export async function buildAllowList() {
   const set = new Set(PREVIEW.map(norm));
   const add = (s) => { const t = norm(s); if (t) set.add(t); };
-  const packsDir = join(root, "공부", "packs");
-  const idx = JSON.parse(await readFile(join(packsDir, "index.json"), "utf8"));
+  const idx = JSON.parse(await readText("공부/packs/index.json"));
   for (const p of idx.packs) {
-    const pack = JSON.parse(await readFile(join(root, "공부", p.file), "utf8"));
+    const pack = JSON.parse(await readText("공부/" + p.file));
     for (const u of pack.units) for (const l of u.lines || []) {
       add(l.en.replace(/\{(\d+)\}/g, (_, i) => { const c = l.c && l.c[+i]; return c ? c.o[c.a] : ""; }));
       add(String(l.ko || "").replace(/^•\s*/, ""));
     }
   }
   try {
-    const voc = JSON.parse(await readFile(join(packsDir, "vocab.json"), "utf8")).m || {};
+    const voc = JSON.parse(await readText("공부/packs/vocab.json")).m || {};
     for (const [w, k] of Object.entries(voc)) { add(w); add(k); }
   } catch (e) { /* 단어장 없음 */ }
   const notes = {};
   const STORY = { addEnglishNotes(pid, m) { notes[pid] = Object.assign(notes[pid] || {}, m); } };
-  for (const f of (await readdir(join(root, "data"))).filter((x) => x.startsWith("english-notes-"))) {
-    new Function("STORY", await readFile(join(root, "data", f), "utf8"))(STORY);
-  }
+  // 해설 파일 목록은 index.html 의 <script src="data/english-notes-…"> 에서 찾아요
+  const files = [...new Set((await readText("index.html")).match(/data\/english-notes-[\w-]+\.js/g) || [])];
+  for (const f of files) new Function("STORY", await readText(f))(STORY);
   for (const m of Object.values(notes)) for (const n of Object.values(m)) for (const ln of n.lines || []) {
     (ln.chunks || []).forEach(([en, ko]) => { add(en); add(ko); });
     (ln.words || []).forEach(([w, k]) => { add(w); add(k); });
   }
-  allowed = set;
   return set;
 }
 
@@ -94,7 +102,9 @@ export function GET(req) {
     if (!voice) throw new HttpError(400, "없는 성우예요.");
     if (text.length > 800) throw new HttpError(413, "글이 너무 길어요.");
     if (!(await allowList()).has(text)) throw new HttpError(403, "공부 자료에 있는 글만 읽어 줄 수 있어요.");
-    const audio = await PROVIDERS[provider()](text, voice.voice || voice.id, style);
+    let audio;
+    try { audio = await PROVIDERS[provider()](text, voice.voice || voice.id, style); }
+    catch (e) { if (e instanceof HttpError) throw e; console.error("tts", e); throw new HttpError(502, "AI 음성을 만들지 못했어요. 기기 목소리로 읽을게요."); }
     return new Response(audio, {
       status: 200,
       headers: { "content-type": "audio/mpeg", "cache-control": "public, max-age=604800, s-maxage=31536000, immutable" },

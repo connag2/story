@@ -1,0 +1,12 @@
+# Cloudflare Pages 설정 (Vercel 은 vercel.json 을 써요 — 둘 다 그대로 둬도 돼요)
+#   빌드 명령: node scripts/build-cf.mjs     빌드 출력 디렉터리: dist
+#   자세한 연결 방법은 README 「Cloudflare Pages」
+name = "story"
+pages_build_output_dir = "dist"
+compatibility_date = "2025-09-01"
+compatibility_flags = ["nodejs_compat"]
+
+# (선택) Upstash Redis 를 안 쓸 때 Cloudflare KV 를 저장소로 — 대시보드에서 KV 이름공간을 만들고 id 를 넣으세요
+# [[kv_namespaces]]
+# binding = "STORY_KV"
+# id = "여기에_KV_id"
