@@ -7,7 +7,7 @@ globalThis.localStorage = { getItem: (k) => store.get(k) ?? null, setItem: (k, v
 globalThis.window = globalThis; globalThis.addEventListener = () => {};
 globalThis.document = { addEventListener() {}, getElementById() { return null; } }; globalThis.setInterval = () => 0;
 require("../js/app.js");
-for (const f of ["reading", "reading-mock-2026-09", "math", "english", "programming", "korean", "guides",
+for (const f of ["reading", "reading-mock-2026-09", "math", "english", "programming", "programming-2", "korean", "guides",
   "solutions-math-1", "solutions-math-2", "solutions-math-3", "solutions-reading", "solutions-programming", "solutions-korean"]) require(`../data/${f}.js`);
 // 화면에 넣을 때 쓰는 safeHtml 을 거친 뒤에도 태그처럼 보이는 "<" 가 남는지 (= 모르는 태그를 썼는지) 확인
 const { safeHtml } = STORY._check;

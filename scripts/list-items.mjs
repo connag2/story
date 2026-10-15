@@ -6,7 +6,7 @@ globalThis.localStorage = { getItem: (k) => store.get(k) ?? null, setItem: (k, v
 globalThis.window = globalThis; globalThis.addEventListener = () => {};
 globalThis.document = { addEventListener() {}, getElementById() { return null; } }; globalThis.setInterval = () => 0;
 require("../js/app.js");
-for (const f of ["reading", "reading-mock-2026-09", "math", "english", "programming", "korean"]) require(`../data/${f}.js`);
+for (const f of ["reading", "reading-mock-2026-09", "math", "english", "programming", "programming-2", "korean"]) require(`../data/${f}.js`);
 const [sid, ...uids] = process.argv.slice(2);
 const s = STORY._check.subjects.find((x) => x.id === sid);
 for (const u of s.units) {

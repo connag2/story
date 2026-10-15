@@ -420,7 +420,9 @@
       h("a", { class: "qtile" + (wrongCount(items) ? " warn" : ""), href: `#/wrong/${s.id}` },
         h("b", {}, "오답노트"), h("span", {}, `${wrongCount(items)}문항`)),
       h("a", { class: "qtile note-tile", href: `#/note/${s.id}` },
-        h("b", {}, "📓 필기장"), h("span", {}, "펜으로 정리 · 풀이 연습")));
+        h("b", {}, "📓 필기장"), h("span", {}, "펜으로 정리 · 풀이 연습")),
+      s.id === "programming" ? h("a", { class: "qtile py-tile", href: "#/py" },
+        h("b", {}, "🐍 파이썬 연습장"), h("span", {}, "코드 쓰고 바로 실행")) : null);
     app.append(hero);
     if (s.exam) app.append(h("div", { class: "scope" }, h("div", { class: "scope-row" }, h("b", {}, "시험범위"), examBox(s))));
 
@@ -788,6 +790,7 @@
     }
 
     function answerArea() {
+      if (it.type === "code") return codeArea();
       if (it.type === "choice" || it.type === "multi") return choiceArea();
       if (it.type === "self") return selfArea();
       return inputArea();
@@ -850,6 +853,15 @@
       return area;
     }
 
+    // 코드 작성: 앱 안에서 실행 · 자동 채점 (js/pyrun.js). 모든 테스트를 통과하면 ⭕
+    function codeArea() {
+      const S = window.STORY;
+      if (!S.pyRunner) return h("div", { class: "muted small" }, "파이썬 실행기를 불러오지 못했어요.");
+      return h("div", { class: "answer-area" },
+        S.pyRunner({ starter: it.starter, tests: it.tests, solution: it.solution, saveKey: it.id, onPass: () => setTimeout(() => mark("o"), 900) }),
+        h("button", { class: "link", onclick: () => mark("x") }, "모르겠어요 · 모범 답안 보기"));
+    }
+
     function selfArea() {
       const area = h("div", { class: "answer-area" });
       area.append(h("textarea", { class: "answer-note", rows: "2", placeholder: "여기에 답이나 풀이를 적어 보세요 (선택)" }));
@@ -898,7 +910,7 @@
     const out = [];
     s.units.forEach((u) => {
       if (!unitIds.has(u.id)) return;
-      u.groups.forEach((g, gi) => g.items.forEach((it) => { if (it.type !== "self") out.push({ it, g, u, gi }); }));
+      u.groups.forEach((g, gi) => g.items.forEach((it) => { if (it.type !== "self" && it.type !== "code") out.push({ it, g, u, gi }); }));
     });
     return out;
   }
@@ -1103,6 +1115,7 @@
     else if (parts[0] === "shop" && window.STORY.viewShop) window.STORY.viewShop(app, parts[1]);
     else if (parts[0] === "note" && window.STORY.viewNotes) window.STORY.viewNotes(app, parts[1]);
     else if (parts[0] === "star") viewStar(app, parts[1]);
+    else if (parts[0] === "py" && window.STORY.viewPy) window.STORY.viewPy(app);
     else if (parts[0] === "eng" && window.STORY.viewEnglish) window.STORY.viewEnglish(app, parts[1], parts[2]);
     else if (parts[0] === "search") viewSearch(app, parts.slice(1).join("/"));
     else viewHome(app);
