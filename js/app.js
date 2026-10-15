@@ -444,7 +444,8 @@
   // 묶음(parts)이 있는 과목: 시험범위 단원별로 「개념 → 교과서 본문 → 실전」을 한 줄에 모아 보여 줘요
   //   parts: [{ title, sub, units: [[단원id, 종류, 짧은 이름], ...] }]
   const uname = (u) => (u.kind ? `${u.kind} · ${u.short || u.title}` : /^\d/.test(u.id) ? `${u.id}. ${u.title}` : u.title);
-  const KINDS = ["개념", "교과서 본문", "실전 연습", "기출", "내신 변형", "작문", "암기"];
+  // 종류 이름 → 배지 색 번호 (css .kind.k0 ~ k6)
+  const KINDS = { "개념": 0, "교과서 본문": 1, "실전 연습": 2, "기출": 3, "모의고사": 3, "내신 변형": 4, "디버깅": 4, "작문": 5, "서답형": 5, "암기": 6, "정리": 6 };
   function orderByParts(s) {
     if (!s.parts || s._ordered) return;
     const rank = new Map();
@@ -461,7 +462,7 @@
       const st = stats(allItems(u));
       const done = st.total && st.done === st.total && st.o / st.total >= 0.8;
       return h("a", { class: "utile" + (done ? " done" : ""), href: `#/s/${s.id}/${u.id}` },
-        u.kind ? h("span", { class: `kind k${Math.max(0, KINDS.indexOf(u.kind))}` }, u.kind) : null,
+        u.kind ? h("span", { class: `kind k${KINDS[u.kind] || 0}` }, u.kind) : null,
         h("div", { class: "no sm" }, u.short || u.title),
         h("div", { class: "tp small" }, `${u.sub ? u.sub + " · " : ""}${st.done}/${st.total}`),
         dots(u.groups.map((g) => g.items)));
