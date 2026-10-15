@@ -49,6 +49,9 @@
     "이렇듯 인공 지능 기술에 대한 두려움은 기술의 실제 영향보다 인간의 심리적 본능이 더 강하게 작동하는 데서 그 원인을 찾을 수 있다. 그러므로 객관적, 균형적으로 사고하려는 노력은 이러한 두려움에서 벗어나는 방법이 될 수 있다.")}
 </div>`;
 
+  // 내신 변형 문제(data/reading-2.js)에서도 같은 지문을 써요
+  STORY.readingPassages = { p11: PASSAGE_11, p21: PASSAGE_21, p24: PASSAGE_24 };
+
   STORY.addUnits("reading", [{
     id: "mock-2026-09",
     title: "9월 모의고사 (2026 고2)",
