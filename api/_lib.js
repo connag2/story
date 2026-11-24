@@ -14,7 +14,9 @@ const mem = new Map();
 let blob = null;
 async function blobApi() {
   if (!process.env.BLOB_READ_WRITE_TOKEN) return null;
-  if (!blob) blob = await import("@vercel/blob");
+  // .catch: 패키지가 없는 곳(Cloudflare 빌드에서 설치 안 됐을 때)에서도 번들이 깨지지 않게
+  if (!blob) blob = await import("@vercel/blob").catch(() => null);
+  if (!blob) throw new HttpError(503, "Blob 저장소를 쓸 수 없어요.");
   return blob;
 }
 const kv = () => globalThis.__STORY_KV || null;          // functions/api/[name].js 가 넣어 줘요
@@ -166,6 +168,31 @@ export async function hashPassword(pw) {
 }
 export async function checkPassword(pw, rec) {
   const k = await scryptAsync(pw, Buffer.from(rec.salt, "base64"));
+  const want = Buffer.from(rec.hash, "base64");
+  return k.length === want.length && timingSafeEqual(k, want);
+}
+
+// ── 가벼운 비밀번호 방식 (v2) — Cloudflare 무료 요금제의 CPU 10ms 한도 안에 들어오게
+//   무거운 계산(PBKDF2 10만 번)은 학생 기기(브라우저, js/sync.js 의 pwKey)가 해서 pk 를 보내고,
+//   서버는 sha256(소금 + pk) 하나만 계산해요 (1ms 미만). DB 가 털려도 비밀번호를 맞히려면 한 번 맞혀 볼 때마다
+//   PBKDF2 10만 번을 돌려야 해서 안전해요. pk 를 안 보낸 옛 화면이면 서버가 대신 계산해요.
+//   (Cloudflare 의 PBKDF2 는 10만 번이 최대라 그 값으로 맞췄어요)
+export const PW_ITER = 100_000;
+export async function pwKey(name, pw) {
+  const enc = new TextEncoder();
+  const key = await globalThis.crypto.subtle.importKey("raw", enc.encode(String(pw)), "PBKDF2", false, ["deriveBits"]);
+  const salt = enc.encode("story-pw-v2:" + String(name).normalize("NFC").trim().toLowerCase());
+  const bits = await globalThis.crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt, iterations: PW_ITER }, key, 256);
+  return Buffer.from(bits).toString("base64url");
+}
+// 짧은 계산으로 충분한 값(pk, 복구 코드 — 둘 다 추측이 불가능할 만큼 길어요)용
+export function quickHash(secret) {
+  const salt = randomBytes(16);
+  return { salt: salt.toString("base64"), hash: createHash("sha256").update(salt).update(String(secret)).digest("base64") };
+}
+export function quickCheck(secret, rec) {
+  if (!rec || !rec.salt || !rec.hash) return false;
+  const k = createHash("sha256").update(Buffer.from(rec.salt, "base64")).update(String(secret)).digest();
   const want = Buffer.from(rec.hash, "base64");
   return k.length === want.length && timingSafeEqual(k, want);
 }

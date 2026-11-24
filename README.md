@@ -93,6 +93,11 @@ Vercel은 그대로 두고 Cloudflare에도 같은 사이트를 올릴 수 있�
   npx wrangler pages dev dist --binding AUTH_SECRET=test --binding ADMIN_NAMES=관리자 --binding OPENAI_API_KEY=fake --kv STORY_KV
   API_BASE=http://localhost:8788 node scripts/test-api.js
   ```
+- **무료 한도 맞춤 최적화**
+  - 비밀번호: 무거운 계산(PBKDF2 10만 번)은 학생 기기에서 하고 서버는 sha256 하나만 → 로그인 서버 CPU 약 0.1ms (무료 한도 10ms, 예전 scrypt 는 약 50ms). 예전 계정은 한 번 로그인하면 자동으로 새 방식으로 바뀌어요.
+  - 가장자리 캐시: 로그인 없이 받는 댓글·이모티콘 목록, 이모티콘 그림, AI 음성을 Cloudflare 캐시에 기억(기억 시간은 Vercel CDN 과 같음). 글쓰기·지우기가 성공하면 그 목록 기억을 바로 지워요.
+  - 쓰기 줄이기: 로그인은 바뀐 게 있을 때만, 기록 동기화는 내용이 같으면 쓰지 않아요(KV 하루 쓰기 1,000번 아끼기).
+  - 서버 확인 요청: 페이지를 열 때마다가 아니라 하루에 한 번.
 - Cloudflare에서는 문자열 코드 실행(`new Function`)이 막혀 있어서, AI 성우가 읽어도 되는 글 목록은 빌드할 때 `dist/_tts-allow.json`으로 미리 만들어요.
 
 ### 로컬에서 실행
