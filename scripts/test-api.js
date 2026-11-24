@@ -45,6 +45,7 @@ assert.equal((await A({ action: "signup", name: "새사람", password: "12" })).
 // 동기화
 assert.equal((await call(push, { method: "PUT", token: t1, body: { keys: { a: { v: "1", t: 1 } } } })).status, 200);
 assert.equal((await call(pull, { method: "GET", token: t1 })).data.keys.a.v, "1");
+assert.equal((await call(push, { method: "PUT", token: t1, body: { keys: { a: { v: "1", t: 1 } } } })).data.same, true, "똑같으면 쓰지 않음");
 assert.equal((await call(pull, { method: "GET" })).status, 401, "토큰 없음");
 
 // 로그인 / 틀린 비밀번호
@@ -83,6 +84,27 @@ assert.match((await A({ action: "recovery", password: "efgh" }, t2)).data.recove
 assert.equal((await A({ action: "delete", password: "efgh" }, t2)).status, 200);
 assert.equal((await A({ action: "login", name: "테스트", password: "efgh" })).status, 404);
 assert.equal((await A({ action: "signup", name: "테스트", password: "1234" })).status, 200, "지운 이름 다시 가입");
+
+// ── 가벼운 비밀번호 방식(v2): 브라우저가 보낸 pk 만으로 로그인 · 예전(scrypt) 계정은 로그인하면 바뀜 · 서버 CPU 측정
+if (!BASE) {
+  const { pwKey, hashPassword, writeJson, readJson, userId } = await import("../api/_lib.js");
+  const pk = await pwKey("가볍게", "pw12");
+  assert.equal((await A({ action: "signup", name: "가볍게", password: "pw12", pk })).status, 200);
+  assert.equal((await A({ action: "login", name: "가볍게", pk })).status, 200, "pk 만으로 로그인");
+  assert.equal((await A({ action: "login", name: "가볍게", pk: await pwKey("가볍게", "nope") })).status, 401);
+  // 서버가 하는 일(sha256)은 아주 짧아야 함 (Cloudflare 무료 10ms)
+  const t0 = process.cpuUsage();
+  for (let i = 0; i < 20; i++) await A({ action: "login", name: "가볍게", pk });
+  const ms = (Object.values(process.cpuUsage(t0)).reduce((a, b) => a + b) / 1000) / 20;
+  assert.ok(ms < 5, `로그인 한 번 CPU ${ms.toFixed(2)}ms`);
+  // 예전 계정 → 첫 로그인에서 새 방식으로
+  const old = userId("예전계정");
+  await writeJson(`users/${old}.json`, { name: "예전계정", ...(await hashPassword("old1")), created: 1, fails: 0, tv: 0 });
+  assert.equal((await A({ action: "login", name: "예전계정", password: "old1", pk: await pwKey("예전계정", "old1") })).status, 200);
+  assert.equal((await readJson(`users/${old}.json`)).kdf, 2, "새 방식으로 바뀜");
+  assert.equal((await A({ action: "login", name: "예전계정", pk: await pwKey("예전계정", "old1") })).status, 200, "바뀐 뒤 pk 로그인");
+  console.log(`ok — 가벼운 비밀번호 방식 (로그인 서버 CPU ${ms.toFixed(2)}ms · 예전 계정 자동 전환)`);
+}
 
 // 연속 실패 잠금
 for (let i = 0; i < 5; i++) await A({ action: "login", name: "테스트", password: "bad" });

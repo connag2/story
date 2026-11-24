@@ -11,7 +11,46 @@ import * as tts from "../../api/tts.js";
 
 const ROUTES = { auth, comments, emoticons, migrate, points, sync, tts };
 
-export async function onRequest({ request, env, params }) {
+// ── Cloudflare 가장자리 캐시: Vercel CDN 처럼, 로그인 없이 받는 공개 응답(댓글 목록 30초 · 이모티콘 목록 1분 · 그림 1년 ·
+//   AI 음성 1년)을 기억해서 저장소 읽기·CPU·음성 요금을 아껴요. 기억 시간은 api/*.js 가 주는 헤더를 그대로 따라요.
+function edgeTtl(res) {
+  const v = res.headers.get("vercel-cdn-cache-control") || "";
+  const c = res.headers.get("cache-control") || "";
+  const m = v.match(/max-age=(\d+)/) || c.match(/s-maxage=(\d+)/);
+  return res.ok && m ? Number(m[1]) : 0;
+}
+const cacheable = (req) => req.method === "GET" && !req.headers.has("authorization") && typeof caches !== "undefined" && caches.default;
+
+export async function onRequest(context) {
+  const { request } = context;
+  if (cacheable(request)) {
+    const hit = await caches.default.match(request);
+    if (hit) {                                                   // 브라우저에는 원래 기억 규칙을 돌려줘요
+      const out = new Response(hit.body, hit);
+      out.headers.set("cache-control", hit.headers.get("x-browser-cache-control") || "no-store");
+      out.headers.delete("x-browser-cache-control");
+      out.headers.set("x-edge-cache", "HIT");
+      return out;
+    }
+  }
+  const res = await run(context);
+  // 글쓰기·지우기 등이 성공하면 그 목록(쿼리 없는 GET)의 기억을 지워서 새 글이 바로 보이게
+  if (request.method !== "GET" && res.ok && typeof caches !== "undefined" && caches.default) {
+    const u = new URL(request.url);
+    context.waitUntil(caches.default.delete(new Request(u.origin + u.pathname)));
+  }
+  const ttl = cacheable(request) ? edgeTtl(res) : 0;
+  if (ttl) {
+    const copy = new Response(res.clone().body, res);
+    copy.headers.set("x-browser-cache-control", res.headers.get("cache-control") || "no-store");
+    copy.headers.set("cache-control", `public, max-age=${ttl}`);   // 가장자리 캐시용 (브라우저에는 원래 헤더 그대로)
+    copy.headers.delete("set-cookie");
+    context.waitUntil(caches.default.put(request, copy));
+  }
+  return res;
+}
+
+async function run({ request, env, params }) {
   // 환경 변수(대시보드 Settings → Variables and Secrets)를 process.env 로 — api/*.js 가 process.env 를 읽어요
   globalThis.process = globalThis.process || { env: {} };
   process.env = process.env || {};

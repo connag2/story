@@ -62,4 +62,11 @@ for (const s of subjects) for (const u of s.units) for (const g of u.groups) for
   if (s.id === "math" || !(it.explain || g.explain)) assert.ok(it.steps && it.steps.length, `${it.id} 풀이 과정 없음`);
   for (const t of it.steps || []) assert.ok((t.match(/\$/g) || []).length % 2 === 0, `${it.id} 수식 $ 짝이 안 맞음`);
 }
+// 브라우저(js/sync.js)와 서버(api/_lib.js)의 비밀번호 키 계산이 같아야 로그인이 돼요
+{
+  const { pwKey } = await import("../api/_lib.js");
+  const name = " 나다 ", pw = "비밀 pass1!";
+  assert.equal(await STORY.pwKey(name, pw), await pwKey(name, pw), "pwKey 브라우저 ↔ 서버");
+  assert.equal(await STORY.pwKey("ABC", "x"), await pwKey("abc", "x"), "이름 대소문자 무시");
+}
 console.log(`ok — 문제 ${n}개 · 모든 과목 공부법·단원 개념·풀이 과정, 채점·동기화 규칙 통과`);

@@ -27,6 +27,10 @@ export function PUT(req) {
     // 처음 맞힌 문제마다 1포인트 — 맞힌 문제 목록은 이 파일에 같이 저장 (쓰기 한 번)
     const prev = await readJson(`data/${u}.json`);
     const { earned, added } = await mergeEarned(u, prev, keys["story-progress-v1"] && keys["story-progress-v1"].v);
+    // 이미 저장된 것과 똑같으면 쓰지 않음 (Cloudflare KV 하루 쓰기 1,000번 · Upstash 사용량 아끼기)
+    if (prev && !added && JSON.stringify(prev.keys) === JSON.stringify(keys) && (prev.earned || []).length === earned.length) {
+      return json({ ok: true, t: prev.t, points: null, same: true });
+    }
     await writeJson(`data/${u}.json`, { keys, t, earned });
     return json({ ok: true, t, points: await pointsAfterEarn(u, earned, added) });
   });

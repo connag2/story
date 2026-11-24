@@ -276,7 +276,25 @@
     el("input", { class: "answer-input", placeholder: ph, type, autocomplete: ac, ...extra });
   const msgEl = () => el("div", { class: "msg", role: "status" });
   const say = (m, text, kind = "") => { m.textContent = text; m.className = "msg" + (kind ? " " + kind : ""); };
-  const authCall = (body) => api("auth", { method: "POST", body: JSON.stringify(body) });
+  // 비밀번호의 무거운 계산(PBKDF2 10만 번)은 이 기기에서 해서 pk 로 같이 보내요 → 서버는 가볍게 확인 (api/_lib.js pwKey 와 같은 계산)
+  async function pwKey(name, pw) {
+    const sub = window.crypto && window.crypto.subtle;
+    if (!sub) return null;                                     // https 가 아니면 서버가 대신 계산
+    const enc = new TextEncoder();
+    const key = await sub.importKey("raw", enc.encode(String(pw)), "PBKDF2", false, ["deriveBits"]);
+    const salt = enc.encode("story-pw-v2:" + String(name).normalize("NFC").trim().toLowerCase());
+    const bits = new Uint8Array(await sub.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt, iterations: 100000 }, key, 256));
+    return btoa(String.fromCharCode(...bits)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  }
+  S.pwKey = pwKey;
+  const authCall = async (body) => {
+    const who = body.name || (auth && auth.name) || "";
+    try {
+      if (body.password) body.pk = await pwKey(who, body.password);
+      if (body.newPassword) body.newPk = await pwKey(who, body.newPassword);
+    } catch (e) { /* 못 하면 서버가 계산 */ }
+    return api("auth", { method: "POST", body: JSON.stringify(body) });
+  };
   function signedIn(r) {
     auth = { token: r.token, name: r.name || (auth && auth.name) };
     LS.set(AUTH, JSON.stringify(auth));
@@ -470,9 +488,14 @@
   }
 
   // 서버(로그인 기능)가 있는 주소인지 한 번만 확인 — 정적 호스팅이면 홈의 로그인 안내를 숨김
+  //   "있다"는 결과는 하루 동안 기억 → 페이지를 열 때마다 서버 요청을 쓰지 않아요 (Cloudflare 하루 요청 한도 아끼기)
   let probe = null;
-  S.serverReady = () => probe || (probe = fetch("/api/auth", { method: "GET" })
-    .then((r) => r.status !== 404).catch(() => false));
+  S.serverReady = () => {
+    if (probe) return probe;
+    if (Date.now() - Number(LS.get("server-ok") || 0) < 864e5) return (probe = Promise.resolve(true));
+    return (probe = fetch("/api/auth", { method: "GET" })
+      .then((r) => { const ok = r.status !== 404; if (ok) LS.set("server-ok", String(Date.now())); return ok; }).catch(() => false));
+  };
   S.isLoggedIn = () => !!auth;
   S.api = api;                         // 다른 기능(댓글 등)에서 같은 로그인으로 서버 호출
   S.userName = () => (auth ? auth.name : null);
